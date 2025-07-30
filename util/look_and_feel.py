@@ -6,8 +6,8 @@ A place to put all the plot styling to visualize settings.
 import plotly.express as px
 import numpy as np
 import pandas as pd
-from plotly_resampler import FigureResampler
-from plotly_resampler import register_plotly_resampler, unregister_plotly_resampler
+# from plotly_resampler import FigureResampler, FigureWidgetResampler
+# from plotly_resampler import register_plotly_resampler, unregister_plotly_resampler
 
 # Import custom module
 import util.constants as const
@@ -132,8 +132,8 @@ def plotly_plot_norm_loglog_msd(df):
     """
     Plot the normalized log-log MSD.
     """
-    fig = FigureResampler(px.line())
-    # fig = px.line()
+    # fig = FigureWidgetResampler(px.line())
+    fig = px.line()
     for uid, group in df.groupby('UID'):
         fig.add_scatter(
             x=group['Lag_T'].iloc[0:6], 
@@ -170,7 +170,7 @@ def plotly_plot_norm_loglog_msd(df):
         ),
     )
 
-    return set_plotly_config(fig)
+    return fig
 
 def plotly_plot_diff_coef_logloghist(df, column='D_Fixed_Alpha'):
 
@@ -307,7 +307,7 @@ def plotly_plot_norm_msd_grouped(df, alphas):
         ),
     )
 
-    return set_plotly_config(fig)
+    return fig
 
 def plotly_plot_diff_coef_vs_alpha(df):
     """

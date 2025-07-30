@@ -13,6 +13,13 @@
 - **nbformat**: For Jupyter notebook formatting.
 - **pyarrow**: For reading and writing data in various formats.
 
+for convinience run these commands to install the packages:
+
+```bash
+conda install -c conda-forge pandas numpy==2.2 plotly plotly-resampler holoviews scipy lmfit jupyter nbformat pyarrow datashader
+pip install kaleido
+```
+
 ## Columns
 
 The reading is done from a CSV file which is output from TrackMate (ImageJ plugin).

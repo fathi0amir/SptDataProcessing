@@ -1,5 +1,6 @@
 # %% # MARK: Imports
 from pathlib import Path
+from re import sub
 import numpy as np
 import pandas as pd # noqa
 import plotly.express as px
@@ -41,11 +42,27 @@ reload_modules()
 # %% # * ====================================
 # MARK: Load data
 # Load the CSV files from the specified directory
-data_path = Path(r"F:\Amir\SLB_Flaoting_Dye_Training_Set")
+data_path = Path(r"D:\Amir Fathi\QD_DOPC_20250721\TrackingResults")
 df = dpp.load_csv_files(data_path)
 
 df.info()
 df.head(20)
+#
+#
+#
+# %% # * ====================================
+# * Filter stationary tracks
+
+def calc_max_distance(df: pd.DataFrame):
+    """
+    Calculate the distance from the origin for each point in the DataFrame.
+    """
+    dx = df['X'].diff().dropna()
+    dy = df['Y'].diff().dropna()
+    return max(np.sqrt(dx**2 + dy**2))
+
+df = df.groupby('UID').filter(lambda g: calc_max_distance(g) > 100)
+#
 #
 #
 #
@@ -123,6 +140,21 @@ df.head()
 #
 #
 #
+
+# %% # * ====================================
+# * Stats on Alpha Flags
+# Calculate the percentage of trajectories in each Alpha_Flag_Fit category
+def calculate_flag_percentages(df):
+    uid_flags = df.groupby('UID')['Alpha_Flag_Fit'].first()
+    flag_counts = uid_flags.value_counts()
+    flag_percentages = (flag_counts / flag_counts.sum() * 100).round(2)
+    return flag_percentages
+
+flag_percentages = calculate_flag_percentages(df)
+
+print("Alpha_Flag_Fit statistics (percentage of trajectories):")
+for flag, pct in flag_percentages.items():
+    print(f"{flag}: {pct}%")
 # %% # * ====================================
 # Plot a histogram of the 'D' column
 reload_modules()
@@ -141,7 +173,8 @@ laf.plotly_plot_alpha_hist(df)
 # MSDs are normalized by the first MSD value for each UID
 # This is to compare the MSDs across all the trajectories
 reload_modules()
-laf.plotly_plot_norm_loglog_msd(df)
+fig = laf.plotly_plot_norm_loglog_msd(df)
+fig.show(renderer="svg")
 #
 #
 #
@@ -149,7 +182,8 @@ laf.plotly_plot_norm_loglog_msd(df)
 # Plot MSD vs Lag_T for each FileID and TrackID
 # Color from the alpha flag
 reload_modules()
-laf.plotly_plot_norm_msd_grouped(df, alphas)
+fig = laf.plotly_plot_norm_msd_grouped(df, alphas)
+fig.show(renderer="svg")
 #
 #
 #
@@ -181,6 +215,8 @@ msd_overlay.opts(
     ylabel="Normalized Mean Squared Displacement (MSD)",
     logx=True,
     logy=True,
+    xlim=(0.03, 0.2),
+    ylim=(0.9, 10),
     show_legend=False,
     width=600,
     height=400,
@@ -200,7 +236,8 @@ msd_overlay #type: ignore
 # Create a Holoviews NdOverlay for the MSD vs Lag_T plot grouped by UID
 msd_overlay = hv.NdOverlay({
     uid: hv.Curve(
-        (group['Lag_T'], group['MSD']/ group['MSD'].iloc[0]),  # Normalize by first value
+        (group['Lag_T'].iloc[0:6], 
+        group['MSD'].iloc[0:6] / group['MSD'].iloc[0]),  # Normalize by first value
         label=str(uid)
     ).opts()
     for uid, group in df.groupby('UID')
@@ -208,18 +245,19 @@ msd_overlay = hv.NdOverlay({
 
 # Display the plot
 # spread(rasterize(paths), px=1) = rasterize(paths, line_width=2)
-rasterize(msd_overlay, line_width=1).opts( #type: ignore
+datashade(msd_overlay, line_width=1).opts( #type: ignore
     alpha=1,
     title="MSD vs Lag_T for each UID",
     xlabel="Lag Time (s)",
     ylabel="Mean Squared Displacement (MSD)", logy=True, logx=True,
-    xlim=(None, 0.2),
-    ylim=(1, 12),
-    width=800,
-    height=600,
+    # xlim=(0.03, 0.2),
+    # ylim=(0.9, 10),
+    width=600,
+    height=400,
     toolbar='above',
-    clim=(0, 40),
-    backend_opts={"plot.output_backend": "svg"}) #type: ignore
+    # clim=(0, 40),
+    # backend_opts={"plot.output_backend": "svg"}
+    ) #type: ignore
 # msd_overlay
 
 #%%
@@ -639,6 +677,8 @@ import vegafusion #noqa
 
 # Enable VegaFusion for server-side transforms
 alt.data_transformers.enable("vegafusion")
+alt.renderers.enable("jupyter")
+# alt.renderers.enable("svg")
 
 df['MSD_norm'] = df.groupby('UID')['MSD'].transform(lambda x: x / x.iloc[0])
 
@@ -667,6 +707,23 @@ msd_chart = (
 )
 msd_chart.show()
 
+
+
+# %%
+alt.Chart(df.reset_index()).mark_rect(clip=True).encode(
+    x=alt.X('Lag_T:Q').bin(maxbins=250).scale(type='log'),
+    y=alt.Y('MSD_norm:Q').bin(maxbins=250).scale(type='log'),
+    color=alt.Color('count():Q').scale(scheme='greenblue', domain=[0, 500])
+)
+
+
+
+# %%
+alt.Chart(df.reset_index()).mark_rect(clip=False).encode(
+    x=alt.X('Lag_T:Q').bin(step=0.02).scale(type='log'),
+    y=alt.Y('MSD_norm:Q').bin(step=0.02).scale(type='log'),
+    color=alt.Color('count():Q').scale(scheme='greenblue')
+)
 # %% # MARK: Ensemble MSD
 enmsd = nlss.calculate_ensemble_msd(df)
 # %%
@@ -704,4 +761,394 @@ fig.update_layout(
         mirror=True
     ),
 )
+# %%
+import altair as alt
+from vega_datasets import data
+
+source = data.seattle_weather()
+
+alt.Chart(source).mark_rect().encode(
+    alt.X("date(date):O").axis(labelAngle=0, format="%e").title("Day"),
+    alt.Y("month(date):O").title("Month"),
+    alt.Color("max(temp_max):Q").title("Max Temp"),
+)
+# %%
+import altair as alt
+import vegafusion  # noqa: F401
+import pandas as pd
+import numpy as np
+
+# alt.data_transformers.enable("vegafusion")
+alt.data_transformers.disable_max_rows()
+
+x = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+y = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+
+chart = alt.Chart(df).mark_rect(clip=True).encode(
+    x=alt.X('x:Q', bin=alt.Bin(maxbins=500), scale=alt.Scale(type='log', domain=[0.1, 10])),
+    y=alt.Y('y:Q', bin=alt.Bin(maxbins=500), scale=alt.Scale(type='log', domain=[0.1, 10])),
+    color=alt.Color('count():Q', scale=alt.Scale(scheme='greenblue'))
+).properties(
+    width=400,
+    height=400,
+    title='Heatmap of Log-Normal Distribution'
+)
+
+chart.show()
+# %%
+
+import plotly.express as px
+import pandas as pd
+import numpy as np
+
+x = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+y = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+
+# Filter out any zero or negative values to avoid log scale issues
+df_filtered = df[(df['x'] > 0) & (df['y'] > 0)]
+
+fig = px.density_heatmap(
+    df_filtered,
+    x='x',
+    y='y',
+    nbinsx=1000,
+    nbinsy=1000,
+    log_x=True,
+    log_y=True,
+)
+fig.update_layout(
+    width=600,
+    height=600,
+    xaxis_range=[-1, 1],  # log10(0.1)= -1, log10(10)=1
+    yaxis_range=[-1, 1]
+)
+fig.show()
+# %%
+import altair as alt
+import pandas as pd
+import numpy as np
+
+x = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+y = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+
+hist, xedges, yedges = np.histogram2d(df['x'], df['y'],
+    bins=[np.logspace(np.log10(min(df['x'])), np.log10(max(df['x'])), 50),
+        np.logspace(np.log10(min(df['y'])), np.log10(max(df['y'])), 50)])
+
+df_binned = pd.DataFrame({'x': xedges[:-1], 'y': yedges[:-1], 'count': hist.ravel()})
+
+chart = alt.Chart(df_binned).mark_rect().encode(
+    x=alt.X('x:Q', scale=alt.Scale(type='log')),
+    y=alt.Y('y:Q', scale=alt.Scale(type='log')),
+    color=alt.Color('count:Q', scale=alt.Scale(scheme='greenblue'))
+).properties(
+    width=600,
+    height=600,
+    title='Heatmap of Log-Normal Distribution'
+)
+
+chart.show()
+
+
+# %%
+import pandas as pd
+import numpy as np
+import altair as alt
+
+x = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+y = np.random.lognormal(mean=np.log10(2.), sigma=1, size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+
+hist, xedges, yedges = np.histogram2d(
+    df['x'],
+    df['y'],
+    bins=[
+        np.logspace(np.log10(min(df['x'])), np.log10(max(df['x'])), 200),
+        np.logspace(np.log10(min(df['y'])), np.log10(max(df['y'])), 200)
+    ]
+)
+
+# Create meshgrid of bin edges for x and y
+x_centers = (xedges[:-1] + xedges[1:]) / 2
+y_centers = (yedges[:-1] + yedges[1:]) / 2
+X, Y = np.meshgrid(x_centers, y_centers, indexing='ij')
+
+df_binned = pd.DataFrame({
+    'x': X.ravel(),
+    'y': Y.ravel(),
+    'count': hist.ravel()
+})
+
+# Now you can plot with Altair
+chart = alt.Chart(df_binned).mark_rect(clip=True).encode(
+    x=alt.X('x:Q', scale=alt.Scale(type='log')),
+    y=alt.Y('y:Q', scale=alt.Scale(type='log')),
+    color=alt.Color('count:Q', scale=alt.Scale(scheme='greenblue'))
+).properties(
+    width=600,
+    height=600,
+    title='Heatmap of Log-Normal Distribution'
+)
+
+chart.show()
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+
+mu, sigma = np.log10(3.), 1. # mean and standard deviation
+s = np.random.lognormal(mu, sigma, 1000)
+
+count, bins, ignored = plt.hist(s, 100, density=True, align='mid')
+x = np.linspace(min(bins), max(bins), 10000)
+pdf = (np.exp(-(np.log(x) - mu)**2 / (2 * sigma**2))
+/ (x * sigma * np.sqrt(2 * np.pi)))
+plt.plot(x, pdf, linewidth=2, color='r')
+plt.axis('tight')
+plt.xlim([0, 10])
+plt.show()
+# %%
+# * This way can also be uused. to create a rasterize of points then get the 
+# * rasterized image and plot it with hv.image and set the bounds and use log scale. 
+# * its just no dynamic any more. 
+# * To keep it interactive I can use rasterize with the log of the data and then
+# * set the costume ticks and labels for the x and y axes. 
+import numpy as np
+import pandas as pd
+import holoviews as hv
+from holoviews import opts
+from holoviews.operation.datashader import (
+    datashade,
+    dynspread,
+    rasterize,
+    shade,
+    spread,
+)
+
+from bokeh.models import FixedTicker
+
+hv.extension('bokeh') #type: ignore
+rng = np.random.default_rng()
+x = rng.lognormal(mean=np.log(100.), sigma=np.log(5), size=100000)
+y = rng.lognormal(mean=np.log(1.), sigma=np.log(2.), size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+logdf = np.log(df + 1e-3)  # Add a small value to avoid log(0)
+points = hv.Points(logdf, kdims=['x', 'y'])
+
+# Define ticks at log10 positions, but label as powers of 10
+x_ticks = [(np.log(i), f"{i}") for i in [0.1, 1, 10, 100, 1000, 10000]]  # 1, 10, 100, 1000
+y_ticks = [(np.log(i), f"{i}") for i in [0.1, 1, 10, 100, 100]]  # 0.1, 1, 10, 100
+majorx_ticks = [np.log(i) for i in [0.1, 1, 10, 100, 1000, 10000]]  # 1, 10, 100, 1000
+minorx_ticks = [np.log(i) for i in [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]]  # 0.1, 1, 10, 100
+majorx_labels = [f"{i}" for i in [0.1, 1, 10, 100, 1000, 10000]]  # 1, 10, 100, 1000
+
+datashaded_points = rasterize(points)
+datashaded_points.opts(
+    width=600,
+    height=600,
+    title='Log-Normal Distribution Heatmap',
+    xlabel='X',
+    ylabel='Y',
+    # xaxis=None,
+    # yaxis=None,
+    # logx=True,
+    # logy=True,
+    # xlim=(-1, 1),
+    # ylim=(-1, 1)
+    # bounds=(0.1, 0.1, 10, 10),  # Set bounds for the image
+    xticks=x_ticks,
+    yticks=y_ticks,
+    backend_opts={"plot.output_backend": "svg",}
+)
+
+# im_points = hv.Image(datashaded_points.data, 
+#                     bounds=(-1, -1, 1, 1)).opts(
+#     width=600,
+#     height=600,
+#     # title="Log-Normal Distribution Heatmap",
+#     # xlabel="X",
+#     # ylabel="Y",
+#     # logx=True,
+#     # logy=True,
+#     # xlim=(-1, 1),
+#     # ylim=(-1, 1),
+# )
+img = datashaded_points[()]
+# datashaded_points
+bounds = (
+    np.exp(min(logdf['x'])),
+    np.exp(min(logdf['y'])),
+    np.exp(max(logdf['x'])),
+    np.exp(max(logdf['y'])),
+)
+
+hv.Image(img.data['x_y Count'].values, bounds=bounds).opts(logx=True, logy=True)
+# %%
+rng = np.random.default_rng()
+x = rng.lognormal(mean=np.log(50), sigma=np.log(2.), size=100000)
+y = rng.lognormal(mean=np.log(3), sigma=np.log(2.), size=100000)
+df = pd.DataFrame({'x': x, 'y': y})
+import matplotlib.pyplot as plt
+
+plt.rcParams['figure.dpi'] = 300  # Set default DPI
+
+plt.figure(figsize=(6, 6))
+plt.hist2d(df['x'], df['y'],
+           bins=[np.logspace(np.log10(df['x'].min()), np.log10(df['x'].max()), 100),
+                 np.logspace(np.log10(df['y'].min()), np.log10(df['y'].max()), 100)])
+plt.xscale('log')
+plt.yscale('log')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.xlim([0.1, 100])
+plt.ylim([0.1, 100])
+plt.title('2D Histogram of Log-Normal Distribution')
+
+plt.tight_layout()
+plt.show()
+# %%
+data = [(i, chr(97+j),  i*j) for i in range(5) for j in range(5) if i!=j]
+# %%
+heatmap = hv.HeatMap(
+    (np.random.randint(1, 10, 100), 
+    np.random.randint(10, 100, 100),
+    np.random.randn(100), np.random.randn(100)), 
+    vdims=['z', 'z2']).sort().aggregate(function=np.sum)
+
+heatmap.opts(opts.HeatMap(tools=['hover'], colorbar=True, 
+    width=600, height=600, toolbar='above', clim=(-2, 2), logx=True, logy=True,))
+# %%
+# * This is how to do it use the heatmap with log scale and bin the data with numpy
+import numpy as np
+import holoviews as hv
+
+hv.extension('bokeh')  # Ensure Bokeh backend is used
+
+#prepare sample data
+rng = np.random.default_rng()
+x = rng.lognormal(mean=np.log(10.), sigma=np.log(2), size=1000000)
+y = rng.lognormal(mean=np.log(1.), sigma=np.log(2.), size=1000000)
+
+hist, xedges, yedges = np.histogram2d(
+    x,
+    y,
+    bins=[
+        np.logspace(np.log(min(x)), np.log(max(x)), 200),
+        np.logspace(np.log(min(y)), np.log(max(y)), 200),
+    ],
+)
+
+heatmap = hv.HeatMap((xedges[:-1], yedges[:-1], hist.T)).opts(
+    width=600,
+    height=600,
+    title='Log-Normal Distribution Heatmap',
+    xlabel='X',
+    ylabel='Y',
+    logx=True,
+    logy=True,
+    xlim=(0.01, 1000),
+    ylim=(0.01, 1000)
+)
+
+heatmap
+# %%
+ls = np.linspace(0, 10, 200)
+xx, yy = np.meshgrid(ls, ls)
+
+bounds=(0.1,0.1,1,1)   # Coordinate system: (left, bottom, right, top)
+img = hv.Image(np.sin(xx)*np.cos(yy), bounds=bounds).opts(
+    logx=True, logy=True,)
+img
+# %%
+import altair as alt
+import pandas as pd
+import numpy as np
+
+# Create the data
+data = pd.DataFrame({
+    'x': [0.01, 0.1, 1, 1, 1, 1, 10, 10, 100, 500, 800]
+})
+
+# Create the chart
+chart = alt.Chart(data).transform_calculate(
+    log_x='log(datum.x)/log(10)'
+).transform_bin(
+    field='log_x',
+    as_=['bin_log_x', 'bin_log_x_end']
+).transform_calculate(
+    x1='pow(10, datum.bin_log_x)',
+    x2='pow(10, datum.bin_log_x_end)'
+).mark_bar().encode(
+    x=alt.X('x1:Q', 
+            scale=alt.Scale(type='log', base=10),
+            axis=alt.Axis(tickCount=5)),
+    x2='x2:Q',
+    y=alt.Y(aggregate='count')
+).properties(
+    description='Log-scaled Histogram.'
+)
+
+chart.show()
+# %%
+import altair as alt
+import pandas as pd
+import numpy as np
+import vegafusion  # noqa: F401
+
+# Enable VegaFusion for server-side transforms
+alt.data_transformers.enable("vegafusion")
+alt.data_transformers.disable_max_rows()
+
+# Create the data
+
+rng = np.random.default_rng()
+x = rng.lognormal(mean=np.log(10.), sigma=np.log(2), size=1000000)
+y = rng.lognormal(mean=np.log(1.), sigma=np.log(2), size=1000000)
+
+data = pd.DataFrame({
+    'x': x, 
+    'y': y
+})
+
+# Create the chart
+chart = alt.Chart(data).transform_calculate(
+    log_x='log(datum.x)/log(10)',
+    log_y='log(datum.y)/log(10)'
+).transform_bin(
+    field='log_x',
+    as_=['bin_log_x', 'bin_log_x_end'],
+    bin=alt.Bin(maxbins=500, step=0.01, base=10)
+).transform_bin(
+    field='log_y',
+    as_=['bin_log_y', 'bin_log_y_end'],
+    bin=alt.Bin(maxbins=500, step=0.01, base=10)
+).transform_calculate(
+    x1='pow(10, datum.bin_log_x)',
+    x2='pow(10, datum.bin_log_x_end)',
+    y1='pow(10, datum.bin_log_y)',
+    y2='pow(10, datum.bin_log_y_end)'
+).mark_rect().encode(
+    x=alt.X('x1:Q', 
+            scale=alt.Scale(type='log', base=10),
+            axis=alt.Axis(tickCount=5)),
+    x2='x2:Q',
+    y=alt.Y('y1:Q', 
+            scale=alt.Scale(type='log', base=10),
+            axis=alt.Axis(tickCount=5)),
+    y2='y2:Q',
+    color=alt.Color('count():Q', scale=alt.Scale(scheme='greenblue')),
+    tooltip=[
+        alt.Tooltip('x1:Q', title='X Bin Start'),
+        alt.Tooltip('x2:Q', title='X Bin End'),
+        alt.Tooltip('y1:Q', title='Y Bin Start'),
+        alt.Tooltip('y2:Q', title='Y Bin End'),
+        alt.Tooltip('count():Q', title='Count')
+    ]
+).properties(
+    description='Log-scaled Histogram.'
+)
+
+chart.show()
 # %%
