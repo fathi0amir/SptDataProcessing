@@ -6,13 +6,21 @@ A place to put all the plot styling to visualize settings.
 import plotly.express as px
 import numpy as np
 import pandas as pd
+import altair as alt
+import vegafusion  # noqa: F401
+import holoviews as hv
+hv.extension('bokeh')  # type: ignore
 # from plotly_resampler import FigureResampler, FigureWidgetResampler
 # from plotly_resampler import register_plotly_resampler, unregister_plotly_resampler
+
+# Enable VegaFusion for server-side transforms
+alt.data_transformers.enable("vegafusion")
+alt.data_transformers.disable_max_rows()
 
 # Import custom module
 import util.constants as const
 
-def plotly_style_tracks(fig):
+def plotly_style_tracks(fig, px_size=65, img_size=900):
     fig.update_layout(
         width=600, 
         height=600,
@@ -22,14 +30,14 @@ def plotly_style_tracks(fig):
         plot_bgcolor='rgb(52, 52, 52)',
     )
     fig.update_xaxes(
-        range=[0, 52000], 
+        range=[0, px_size * img_size], 
         title=None, 
         showticklabels=False, 
         showgrid=False, 
         zeroline=False
         )
     fig.update_yaxes(
-        range=[0, 52000],
+        range=[0, px_size * img_size],
         title=None, 
         showticklabels=False, 
         showgrid=False, 
@@ -41,7 +49,7 @@ def plotly_style_tracks(fig):
     
     return fig
 
-def set_plotly_config(fig):
+def set_plotly_config(fig, width=800, height=600):
     """
     Set the configuration for the Plotly figure.
     Wrapper for fig.show(config=config)
@@ -51,11 +59,36 @@ def set_plotly_config(fig):
             'scale': 1,
             'format': 'svg',
             'filename': 'figure',
-            'width': 800,
-            'height': 600
+            'width': width,
+            'height': height
         }
     }
     return fig.show(config=config)
+
+def plotly_style_single_track(fig):
+    fig.update_layout(
+        width=600, 
+        height=600,
+        showlegend=False, 
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor='rgba(0, 0, 0, 0)',
+        plot_bgcolor='rgb(52, 52, 52)',
+        yaxis_scaleanchor="x",  # lock aspect ratio
+        yaxis_scaleratio=1      # 1:1 aspect ratio
+    )
+    fig.update_xaxes(
+        title=None, 
+        showticklabels=False, 
+        showgrid=False, 
+        zeroline=False
+    )
+    fig.update_yaxes(
+        title=None, 
+        showticklabels=False, 
+        showgrid=False, 
+        zeroline=False
+    )
+    return fig
 
 def plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha'):
     """
@@ -98,7 +131,7 @@ def plotly_plot_alpha_hist(df, column='Alpha'):
     Plot the diffusion coefficient Histogram.
     """
     grouped_df = df.groupby('UID')[column].first().reset_index()
-    fig = px.histogram(x=grouped_df[column], nbins=150)
+    fig = px.histogram(x=grouped_df[column], nbins=50)
     fig.update_layout(
         xaxis_title='Alpha',
         yaxis_title='Count',
@@ -212,20 +245,24 @@ def plotly_plot_diff_coef_loglogarea(df, column='D_Fixed_Alpha'):
     Plot the diffusion coefficient Histogram with log-log area.
     """
     grouped_df = df.groupby('UID')[column].first().reset_index()
-    hist, bin = np.histogram(grouped_df[column], bins=150)
+    hist, bin = np.histogram(
+        grouped_df[column], 
+        bins=
+        np.logspace(np.log(min(grouped_df[column])), np.log(max(grouped_df[column])), 30)
+    )
     bin_centers = 0.5 * (bin[:-1] + bin[1:])
     fig = px.area(x=bin_centers, y=hist)
     fig.update_traces(fill='tozeroy')  # Fill the area under the curve
     fig.update_layout(
-        xaxis_title='Diffusion Coefficient (D)',
+        xaxis_title='Diffusion Coefficient (µm²/s)',
         yaxis_title='Count',
         title='Diffusion Coefficient Histogram (Log-Log Scale)',
         width=800,
         height=600,
-        xaxis_range=[np.log10(0.01), np.log10(10)],
-        yaxis_range=[np.log10(1), np.log10(50)],
+        xaxis_range=[np.log10(0.001), np.log10(10)],
+        # yaxis_range=[np.log10(1), np.log10(50)],
         xaxis_type='log',
-        yaxis_type='log',
+        # yaxis_type='log',
         template='plotly_white',
         showlegend=False,
         xaxis=dict(
@@ -360,3 +397,80 @@ def plotly_plot_diff_coef_vs_alpha(df):
     )
 
     return set_plotly_config(fig)
+
+def vega_plot_msd_loglog_fast(df, bin_size=0.03):
+    """
+    Plot the normalized log-log MSD using Vega.
+    """
+    
+    # Create the chart
+    chart = alt.Chart(df).transform_calculate(
+        log_x='log(datum.Lag_T)/log(10)',
+        log_y='log(datum.MSD_norm)/log(10)'
+    ).transform_bin(
+        field='log_x',
+        as_=['bin_log_x', 'bin_log_x_end'],
+        bin=alt.Bin(maxbins=200, step=bin_size, base=10)
+    ).transform_bin(
+        field='log_y',
+        as_=['bin_log_y', 'bin_log_y_end'],
+        bin=alt.Bin(maxbins=200, step=bin_size, base=10)
+    ).transform_calculate(
+        x1='pow(10, datum.bin_log_x)',
+        x2='pow(10, datum.bin_log_x_end)',
+        y1='pow(10, datum.bin_log_y)',
+        y2='pow(10, datum.bin_log_y_end)'
+    ).mark_rect(clip=True).encode(
+        x=alt.X('x1:Q', 
+                scale=alt.Scale(type='log', base=10),
+                axis=alt.Axis(tickCount=5)),
+        x2='x2:Q',
+        y=alt.Y('y1:Q', 
+                scale=alt.Scale(type='log', base=10),
+                axis=alt.Axis(tickCount=5)),
+        y2='y2:Q',
+        color=alt.Color('count():Q', scale=alt.Scale(scheme='greenblue', domain=[0, 150])),
+        tooltip=[
+            alt.Tooltip('x1:Q', title='X Bin Start'),
+            alt.Tooltip('x2:Q', title='X Bin End'),
+            alt.Tooltip('y1:Q', title='Y Bin Start'),
+            alt.Tooltip('y2:Q', title='Y Bin End'),
+            alt.Tooltip('count():Q', title='Count')
+        ]
+    ).properties(
+        description='Log-scaled Histogram.',
+        width=600,
+        height=600
+    ).interactive()
+
+    return chart.show()
+
+def holoviz_plot_msd_loglog_fast(df, bin_num=200):
+    """
+    Plot the normalized log-log MSD using HoloViz.
+    """
+    hist, xedges, yedges = np.histogram2d(
+        df.Lag_T,
+        df.MSD_norm,
+        bins=[
+            np.logspace(np.log(min(df.Lag_T)), np.log(max(df.Lag_T)), 200),
+            np.logspace(np.log(min(df.MSD_norm)), np.log(max(df.MSD_norm)), 200),
+        ],
+    )
+    hist[hist == 0] = np.nan  # Replace zeros with NaN for better visualization
+    heatmap = hv.HeatMap((xedges[:-1], yedges[:-1], hist.T)).opts(
+        width=600,
+        height=600,
+        title='Log-Normal Distribution Heatmap',
+        xlabel='Time Lag (s)',
+        ylabel='MSD (µm²)',
+        logx=True,
+        logy=True,
+        xlim=(0.01, 1000),
+        ylim=(0.01, 1000),
+        clim=(0, 30),  # Set color limits for the heatmap
+        colorbar=True,  # Show color bar
+        cmap='viridis'
+    )
+
+    return heatmap

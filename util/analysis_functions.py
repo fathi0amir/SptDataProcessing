@@ -925,3 +925,12 @@ def calculate_ensemble_msd(df, max_lag=20):
             })
     
     return pd.DataFrame(msd_results)
+
+def calculate_flag_percentages(df):
+    """Calculate the percentage of each flag type for the Alpha_Flag_Fit column.
+    This function groups the DataFrame by 'UID' and counts the occurrences of each flag type.
+    """
+    uid_flags = df.groupby('UID')['Alpha_Flag_Fit'].first()
+    flag_counts = uid_flags.value_counts()
+    flag_percentages = (flag_counts / flag_counts.sum() * 100).round(2)
+    return flag_percentages

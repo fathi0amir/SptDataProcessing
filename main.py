@@ -42,7 +42,7 @@ reload_modules()
 # %% # * ====================================
 # MARK: Load data
 # Load the CSV files from the specified directory
-data_path = Path(r"D:\Amir Fathi\QD_DOPC_20250721\TrackingResults")
+data_path = Path(r"C:\Users\amir0\Desktop\GD_DOPC_20250825\TrackingResults")
 df = dpp.load_csv_files(data_path)
 
 df.info()
@@ -52,16 +52,19 @@ df.head(20)
 #
 # %% # * ====================================
 # * Filter stationary tracks
-
-def calc_max_distance(df: pd.DataFrame):
+# ! I need to fix this part
+def calculate_top_distance_sum(df: pd.DataFrame):
     """
     Calculate the distance from the origin for each point in the DataFrame.
+    Maximum jump distance should be greater than localization error.
     """
     dx = df['X'].diff().dropna()
     dy = df['Y'].diff().dropna()
-    return max(np.sqrt(dx**2 + dy**2))
+    dist = np.sqrt(dx**2 + dy**2)
+    dist_top_10 = dist.nlargest(10)
+    return dist_top_10.sum()
 
-df = df.groupby('UID').filter(lambda g: calc_max_distance(g) > 100)
+df = df.groupby('UID').filter(lambda g: calculate_top_distance_sum(g) > 10* 40.0)
 #
 #
 #
@@ -84,7 +87,8 @@ df.to_parquet(data_path / 'tracking_results.parquet', index=False)
 # %% # * Add the MSD Lag_T columns
 # This is necessary for all the MSD based analysis
 df = df.groupby('UID').apply(nlss.calculate_msd).reset_index(drop=True)
-#
+# Normalize MSD by the first value
+df['MSD_norm'] = df.groupby('UID')['MSD'].transform(lambda x: x / x.iloc[0])
 #
 #
 # %% # * Calculate D in normal diffusion model
@@ -96,6 +100,11 @@ df = df.groupby('UID').apply(nlss.calculate_diff_d).reset_index(drop=True)
 # Use the alpha value to flag each trajectory as well. 
 # The flags are based on ALPHA_THRESHOLDS defined in util/constants.py
 df = df.groupby('UID').apply(nlss.flag_alpha_by_fit).reset_index(drop=True)
+#
+# * Calculate D when Alpha is fixed (exact value for that trajectory)
+df = df.groupby('UID').apply(nlss.calc_d_fix_alpha).reset_index(drop=True)
+#
+#
 #
 #
 #
@@ -109,13 +118,11 @@ df = df.groupby('UID').apply(nlss.calc_d_mean_alpha).reset_index(drop=True)
 #
 #
 #
-# %% # * Calculate D when Alpha is fixed (exact value for that trajectory)
-df = df.groupby('UID').apply(nlss.calc_d_fix_alpha).reset_index(drop=True)
-#
-#
-#
+
 # %% # * Create a new dataframe with two columns: Alpha Flag , mean Alpha for each flag (class)
 alphas = df.groupby('Alpha_Flag_Fit')['Alpha'].mean()
+print("Alpha Mean for each Alpha Flag:")
+print(alphas)
 #
 #
 #
@@ -144,13 +151,8 @@ df.head()
 # %% # * ====================================
 # * Stats on Alpha Flags
 # Calculate the percentage of trajectories in each Alpha_Flag_Fit category
-def calculate_flag_percentages(df):
-    uid_flags = df.groupby('UID')['Alpha_Flag_Fit'].first()
-    flag_counts = uid_flags.value_counts()
-    flag_percentages = (flag_counts / flag_counts.sum() * 100).round(2)
-    return flag_percentages
 
-flag_percentages = calculate_flag_percentages(df)
+flag_percentages = nlss.calculate_flag_percentages(df)
 
 print("Alpha_Flag_Fit statistics (percentage of trajectories):")
 for flag, pct in flag_percentages.items():
@@ -158,9 +160,9 @@ for flag, pct in flag_percentages.items():
 # %% # * ====================================
 # Plot a histogram of the 'D' column
 reload_modules()
-laf.plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha')
+# laf.plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha')
 # laf.plotly_plot_diff_coef_logloghist(df)
-# laf.plotly_plot_diff_coef_loglogarea(df)
+laf.plotly_plot_diff_coef_loglogarea(df, column='D_Fixed_Alpha')
 #
 #
 #
@@ -168,13 +170,19 @@ laf.plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha')
 # Plot a histogram of the 'Alpha' column
 reload_modules()
 laf.plotly_plot_alpha_hist(df)
+#
+#
+#
 # %% # * ====================================
 # Plot MSD vs Lag_T for each FileID and TrackID
 # MSDs are normalized by the first MSD value for each UID
 # This is to compare the MSDs across all the trajectories
 reload_modules()
-fig = laf.plotly_plot_norm_loglog_msd(df)
-fig.show(renderer="svg")
+# fig = laf.plotly_plot_norm_loglog_msd(df)
+# fig.show(renderer="svg")
+#
+# laf.vega_plot_msd_loglog_fast(df, bin_size=0.03)
+laf.holoviz_plot_msd_loglog_fast(df, bin_num=150)
 #
 #
 #
@@ -195,13 +203,120 @@ laf.plotly_plot_diff_coef_vs_alpha(df)
 #
 #
 # %% # * ====================================
+# filter and plot for normal trajectories based on the alpha flag
+#
+reload_modules()
+normal_trajectories = df[df['Alpha_Flag_Fit'] == 'normal']
+fig = px.line(normal_trajectories, x='X', y='Y', color='UID')
+fig = laf.plotly_style_tracks(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+
+#%% # * ====================================
+# Plot a single random normal trajectory
+#
+reload_modules()
+random_trajectory = normal_trajectories[
+    normal_trajectories['UID'] == normal_trajectories['UID'].unique()[10]]
+fig = px.line(random_trajectory, x='X', y='Y')
+fig = laf.plotly_style_single_track(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Filter and plot for subdiffusive trajectories
+subdiffusive_trajectories = df[df['Alpha_Flag_Fit'] == 'sub']
+fig = px.line(subdiffusive_trajectories, x='X', y='Y', color='UID')
+fig = laf.plotly_style_tracks(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Plot a random subdiffusive trajectory
+random_subdiffusive_trajectory = subdiffusive_trajectories[
+    subdiffusive_trajectories['UID'] == subdiffusive_trajectories['UID'].unique()[10]]
+fig = px.line(random_subdiffusive_trajectory, x='X', y='Y')
+fig = laf.plotly_style_single_track(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Filter and plot for superdiffusive trajectories
+superdiffusive_trajectories = df[df['Alpha_Flag_Fit'] == 'sup']
+fig = px.line(superdiffusive_trajectories, x='X', y='Y', color='UID')
+fig = laf.plotly_style_tracks(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Plot a random superdiffusive trajectory
+random_superdiffusive_trajectory = superdiffusive_trajectories[
+    superdiffusive_trajectories['UID'] == superdiffusive_trajectories['UID'].unique()[0]]
+fig = px.line(random_superdiffusive_trajectory, x='X', y='Y')
+fig = laf.plotly_style_single_track(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Filter and plot for ignored trajectories
+ignore_trajectories = df[df['Alpha_Flag_Fit'] == 'ignore']
+fig = px.line(ignore_trajectories, x='X', y='Y', color='UID')
+fig = laf.plotly_style_tracks(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# Plot a random ignored trajectory
+random_ignored_trajectory = ignore_trajectories[
+    ignore_trajectories['UID'] == ignore_trajectories['UID'].unique()[10]]
+fig = px.line(random_ignored_trajectory, x='X', y='Y')
+fig = laf.plotly_style_single_track(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %%
+# Plot for all alpha flags except 'ignore' 
+# Filter for ignored trajectories
+ignore_trajectories = df[df['Alpha_Flag_Fit'] != 'ignore']
+
+fig = px.line()
+for id, g in ignore_trajectories.groupby('UID'):
+    c='#00CC96'
+    if g['Alpha_Flag_Fit'].iloc[0] == 'sup':
+        c = '#EF553B'
+    elif g['Alpha_Flag_Fit'].iloc[0] == 'sub':
+        c = '#636EFA'
+    fig.add_scatter(x=g['X'], y=g['Y'], mode='lines',
+        line=dict(width=1, color=c), name=f'UID: {id}')
+
+fig.update_traces(
+    hovertemplate=
+        'X: %{x}<br>' +
+        'Y: %{y}<br>'
+)
+fig = laf.plotly_style_tracks(fig)
+laf.set_plotly_config(fig, width=600, height=600)  # wrapper for fig.show(config=config)
+#
+#
+#
+# %% # * ====================================
+# * =========================================
+# * =========================================
 # MARK: Plot MSD JD
 # Create a Holoviews Dataset for the MSD vs Lag_T plot
 # Overlay all curves for each TrackID
 msd_overlay = hv.NdOverlay({
     uid: hv.Curve(
         (group['Lag_T'].iloc[0:6],  # Use first 6 points for MSD
-        group['MSD'].iloc[0:6] / group['MSD'].iloc[0]),  # Normalize by first value
+        group['MSD_norm'].iloc[0:6]),  # Normalize by first value
         label=str(uid)
     ).opts(
         line_width=2, color='blue', alpha=0.05
@@ -260,15 +375,7 @@ datashade(msd_overlay, line_width=1).opts( #type: ignore
     ) #type: ignore
 # msd_overlay
 
-#%%
-#
-# Create a heatmap of Lag_T vs MSD
-fig = px.density_heatmap(x=df["Lag_T"].iloc[0:6], y=df["MSD"].iloc[0:6], title="Heatmap of Lag_T vs MSD", nbinsx=100, nbinsy=10)
 
-fig.show()
-#
-#
-#
 # %% # * ====================================
 # filter the trajectories based on the diffusion coefficient
 # Filter the data for a specific FileID
@@ -680,7 +787,7 @@ alt.data_transformers.enable("vegafusion")
 alt.renderers.enable("jupyter")
 # alt.renderers.enable("svg")
 
-df['MSD_norm'] = df.groupby('UID')['MSD'].transform(lambda x: x / x.iloc[0])
+
 
 # Altair plot: MSD vs Lag_T, all lines same color
 msd_chart = (
@@ -1011,144 +1118,4 @@ plt.show()
 # %%
 data = [(i, chr(97+j),  i*j) for i in range(5) for j in range(5) if i!=j]
 # %%
-heatmap = hv.HeatMap(
-    (np.random.randint(1, 10, 100), 
-    np.random.randint(10, 100, 100),
-    np.random.randn(100), np.random.randn(100)), 
-    vdims=['z', 'z2']).sort().aggregate(function=np.sum)
-
-heatmap.opts(opts.HeatMap(tools=['hover'], colorbar=True, 
-    width=600, height=600, toolbar='above', clim=(-2, 2), logx=True, logy=True,))
-# %%
-# * This is how to do it use the heatmap with log scale and bin the data with numpy
-import numpy as np
-import holoviews as hv
-
-hv.extension('bokeh')  # Ensure Bokeh backend is used
-
-#prepare sample data
-rng = np.random.default_rng()
-x = rng.lognormal(mean=np.log(10.), sigma=np.log(2), size=1000000)
-y = rng.lognormal(mean=np.log(1.), sigma=np.log(2.), size=1000000)
-
-hist, xedges, yedges = np.histogram2d(
-    x,
-    y,
-    bins=[
-        np.logspace(np.log(min(x)), np.log(max(x)), 200),
-        np.logspace(np.log(min(y)), np.log(max(y)), 200),
-    ],
-)
-
-heatmap = hv.HeatMap((xedges[:-1], yedges[:-1], hist.T)).opts(
-    width=600,
-    height=600,
-    title='Log-Normal Distribution Heatmap',
-    xlabel='X',
-    ylabel='Y',
-    logx=True,
-    logy=True,
-    xlim=(0.01, 1000),
-    ylim=(0.01, 1000)
-)
-
-heatmap
-# %%
-ls = np.linspace(0, 10, 200)
-xx, yy = np.meshgrid(ls, ls)
-
-bounds=(0.1,0.1,1,1)   # Coordinate system: (left, bottom, right, top)
-img = hv.Image(np.sin(xx)*np.cos(yy), bounds=bounds).opts(
-    logx=True, logy=True,)
-img
-# %%
-import altair as alt
-import pandas as pd
-import numpy as np
-
-# Create the data
-data = pd.DataFrame({
-    'x': [0.01, 0.1, 1, 1, 1, 1, 10, 10, 100, 500, 800]
-})
-
-# Create the chart
-chart = alt.Chart(data).transform_calculate(
-    log_x='log(datum.x)/log(10)'
-).transform_bin(
-    field='log_x',
-    as_=['bin_log_x', 'bin_log_x_end']
-).transform_calculate(
-    x1='pow(10, datum.bin_log_x)',
-    x2='pow(10, datum.bin_log_x_end)'
-).mark_bar().encode(
-    x=alt.X('x1:Q', 
-            scale=alt.Scale(type='log', base=10),
-            axis=alt.Axis(tickCount=5)),
-    x2='x2:Q',
-    y=alt.Y(aggregate='count')
-).properties(
-    description='Log-scaled Histogram.'
-)
-
-chart.show()
-# %%
-import altair as alt
-import pandas as pd
-import numpy as np
-import vegafusion  # noqa: F401
-
-# Enable VegaFusion for server-side transforms
-alt.data_transformers.enable("vegafusion")
-alt.data_transformers.disable_max_rows()
-
-# Create the data
-
-rng = np.random.default_rng()
-x = rng.lognormal(mean=np.log(10.), sigma=np.log(2), size=1000000)
-y = rng.lognormal(mean=np.log(1.), sigma=np.log(2), size=1000000)
-
-data = pd.DataFrame({
-    'x': x, 
-    'y': y
-})
-
-# Create the chart
-chart = alt.Chart(data).transform_calculate(
-    log_x='log(datum.x)/log(10)',
-    log_y='log(datum.y)/log(10)'
-).transform_bin(
-    field='log_x',
-    as_=['bin_log_x', 'bin_log_x_end'],
-    bin=alt.Bin(maxbins=500, step=0.01, base=10)
-).transform_bin(
-    field='log_y',
-    as_=['bin_log_y', 'bin_log_y_end'],
-    bin=alt.Bin(maxbins=500, step=0.01, base=10)
-).transform_calculate(
-    x1='pow(10, datum.bin_log_x)',
-    x2='pow(10, datum.bin_log_x_end)',
-    y1='pow(10, datum.bin_log_y)',
-    y2='pow(10, datum.bin_log_y_end)'
-).mark_rect().encode(
-    x=alt.X('x1:Q', 
-            scale=alt.Scale(type='log', base=10),
-            axis=alt.Axis(tickCount=5)),
-    x2='x2:Q',
-    y=alt.Y('y1:Q', 
-            scale=alt.Scale(type='log', base=10),
-            axis=alt.Axis(tickCount=5)),
-    y2='y2:Q',
-    color=alt.Color('count():Q', scale=alt.Scale(scheme='greenblue')),
-    tooltip=[
-        alt.Tooltip('x1:Q', title='X Bin Start'),
-        alt.Tooltip('x2:Q', title='X Bin End'),
-        alt.Tooltip('y1:Q', title='Y Bin Start'),
-        alt.Tooltip('y2:Q', title='Y Bin End'),
-        alt.Tooltip('count():Q', title='Count')
-    ]
-).properties(
-    description='Log-scaled Histogram.'
-)
-
-chart.show()
 # %%
