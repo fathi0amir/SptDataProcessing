@@ -42,7 +42,7 @@ reload_modules()
 # %% # * ====================================
 # MARK: Load data
 # Load the CSV files from the specified directory
-data_path = Path(r"C:\Users\amir0\Desktop\GD_DOPC_20250825\TrackingResults")
+data_path = Path(r"F:\Amir\PhaseSeperation\DOPC_20260115")
 df = dpp.load_csv_files(data_path)
 
 df.info()
@@ -51,7 +51,9 @@ df.head(20)
 #
 #
 # %% # * ====================================
-# * Filter stationary tracks
+# * Filter stationary tracks 
+# (Another way to do this would be to calculate standard deviation of X and Y in 
+# each track, if it smaller than the localization error, then ignore that track)
 # ! I need to fix this part
 def calculate_top_distance_sum(df: pd.DataFrame):
     """
@@ -157,12 +159,15 @@ flag_percentages = nlss.calculate_flag_percentages(df)
 print("Alpha_Flag_Fit statistics (percentage of trajectories):")
 for flag, pct in flag_percentages.items():
     print(f"{flag}: {pct}%")
+#
+#
+#
 # %% # * ====================================
 # Plot a histogram of the 'D' column
 reload_modules()
-# laf.plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha')
-# laf.plotly_plot_diff_coef_logloghist(df)
-laf.plotly_plot_diff_coef_loglogarea(df, column='D_Fixed_Alpha')
+laf.plotly_plot_diff_coef_hist(df, column='D_Norm', nbins=100)
+# laf.plotly_plot_diff_coef_logloghist(df, column='D_Norm')
+# laf.plotly_plot_diff_coef_loglogarea(df, column='D_Norm')
 #
 #
 #

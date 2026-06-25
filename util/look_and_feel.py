@@ -90,15 +90,15 @@ def plotly_style_single_track(fig):
     )
     return fig
 
-def plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha'):
+def plotly_plot_diff_coef_hist(df, column='D_Fixed_Alpha', nbins=150):
     """
     Plot the diffusion coefficient Histogram.
     """
     grouped_df = df.groupby('UID')[column].first().reset_index()
     # grouped_df = grouped_df[grouped_df['D_Fixed_Alpha'] > 0.1]
-    fig = px.histogram(x=grouped_df[column], nbins=150)
+    fig = px.histogram(x=grouped_df[column], nbins=nbins)
     fig.update_layout(
-        xaxis_title='Diffusion Coefficient (D)',
+        xaxis_title='Diffusion Coefficient (µm²/s)',
         yaxis_title='Count',
         title='Diffusion Coefficient Histogram',
         width=800,
@@ -208,7 +208,7 @@ def plotly_plot_norm_loglog_msd(df):
 def plotly_plot_diff_coef_logloghist(df, column='D_Fixed_Alpha'):
 
     grouped_df = df.groupby('UID')[column].first().reset_index()
-    hist, bin = np.histogram(grouped_df[column], bins=150)
+    hist, bin = np.histogram(grouped_df[column], bins=1000)
     bin_centers = 0.5 * (bin[:-1] + bin[1:])
 
     fig = px.bar(x=bin_centers, y=hist)
@@ -219,8 +219,8 @@ def plotly_plot_diff_coef_logloghist(df, column='D_Fixed_Alpha'):
         title='Diffusion Coefficient Histogram (Log-Log Scale)',
         width=800,
         height=600,
-        xaxis_range=[np.log10(0.1), np.log10(10)],
-        yaxis_range=[np.log10(1), np.log10(20)],
+        xaxis_range=[np.log10(0.001), np.log10(0.1)],
+        yaxis_range=[np.log10(1), np.log10(1000)],
         xaxis_type='log',
         yaxis_type='log',
         template='plotly_white',
@@ -248,7 +248,7 @@ def plotly_plot_diff_coef_loglogarea(df, column='D_Fixed_Alpha'):
     hist, bin = np.histogram(
         grouped_df[column], 
         bins=
-        np.logspace(np.log(min(grouped_df[column])), np.log(max(grouped_df[column])), 30)
+        np.logspace(np.log(min(grouped_df[column])), np.log(max(grouped_df[column])), 100)
     )
     bin_centers = 0.5 * (bin[:-1] + bin[1:])
     fig = px.area(x=bin_centers, y=hist)
@@ -259,7 +259,7 @@ def plotly_plot_diff_coef_loglogarea(df, column='D_Fixed_Alpha'):
         title='Diffusion Coefficient Histogram (Log-Log Scale)',
         width=800,
         height=600,
-        xaxis_range=[np.log10(0.001), np.log10(10)],
+        xaxis_range=[np.log10(0.0001), np.log10(0.01)],
         # yaxis_range=[np.log10(1), np.log10(50)],
         xaxis_type='log',
         # yaxis_type='log',
