@@ -23,7 +23,7 @@ pip install kaleido
 Or using `uv` (after creating the environment):
 
 ```bash
-uv add jupyter holoviews datashader plotly plotly-resampler lmfit altair vegafusion fastparquet
+uv add jupyter holoviews datashader plotly plotly-resampler lmfit altair vegafusion vl-convert-python pyarrow fastparquet
 ``` 
 
 ## Columns

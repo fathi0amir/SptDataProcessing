@@ -118,7 +118,7 @@ def clean_trackpy_data(df: pd.DataFrame, exposure_time: float = 0.033)->pd.DataF
 
     return df
 
-def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033)->pd.DataFrame:
+def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033, suffix: str = None)->pd.DataFrame:
 
     """
     Load and combine multiple Parquet files from a specified directory into a single DataFrame.
@@ -129,12 +129,16 @@ def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033)->pd.DataFr
 
     for file in parquet_files:
         df = pd.read_parquet(file, engine='fastparquet')
-        fileid = file.stem.split('_')[-1]
+        if suffix is not None and suffix in file.stem:
+            fileid = file.stem.replace(suffix, '')
+        else:
+            fileid = file.stem
         df['FileID'] = fileid
         df = clean_trackpy_data(df, exposure_time=exposure_time)
         df['UID'] = df['FileID'] + '-' + df['TrackID']
         dfs.append(df)
 
     df = pd.concat(dfs, ignore_index=True)
+    df[['X', 'Y']] *= 65
 
     return df
