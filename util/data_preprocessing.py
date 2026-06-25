@@ -59,7 +59,7 @@ def format_track_id(x:int)->str:
 
 
 # Define the path to the directory containing the CSV files
-def load_csv_files(csv_root)->pd.DataFrame:
+def load_trackmate_csv_files(csv_root)->pd.DataFrame:
     """
     Load and combine multiple CSV files from a specified directory into a single DataFrame.
     The necessary columns are selected, cleaned, and sorted by 'TrackID' and 'Frame'.
@@ -83,10 +83,10 @@ def load_csv_files(csv_root)->pd.DataFrame:
 
     for file in csv_files:
         df = pd.read_csv(file, engine='pyarrow')
+        df['FileID'] = file.stem
         df = clean_data(df)
         df = df.sort_values(by='TrackID')
         df = sort_by_frame(df)
-        df['FileID'] = file.stem
         dfs.append(df)
 
     df = pd.concat(dfs, ignore_index=True)
@@ -94,3 +94,47 @@ def load_csv_files(csv_root)->pd.DataFrame:
     df['UID'] = df['FileID'] + '-' + df['TrackID']
 
     return df 
+
+def clean_trackpy_data(df: pd.DataFrame, exposure_time: float = 0.033)->pd.DataFrame:
+    """
+    Clean the dataframe from TrackPy to match the format used originally with TrackMate.
+    Operations: 
+    1. Rename columns: 'particle' to 'TrackID', 'x' to 'X', 'y' to 'Y', and 'frame' to 'Frame'.
+    2. Add a new column 'T' 
+    3. Sort the dataframe by 'TrackID' and 'Frame'.
+    4. Convert TrackID to string with leading zeros to ensure a consistent length of three characters.
+    
+
+    Args: 
+        df (pd.DataFrame): The input DataFrame to be cleaned.
+        exposure_time (float): The exposure time in seconds. Default is 0.033 seconds.
+    Returns:
+        pd.DataFrame: The cleaned DataFrame
+    """
+    df = df.rename(columns={'particle': 'TrackID', 'x': 'X', 'y': 'Y', 'frame': 'Frame'})
+    df['T'] = df['Frame'].astype('float32') * exposure_time
+    df = df.sort_values(by=['TrackID', 'Frame']).reset_index(drop=True)
+    df['TrackID'] = df['TrackID'].apply(lambda x: f"{x:03d}")
+
+    return df
+
+def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033)->pd.DataFrame:
+
+    """
+    Load and combine multiple Parquet files from a specified directory into a single DataFrame.
+    """
+    path = Path(data_wd)
+    parquet_files = path.glob('*.parquet')
+    dfs = []
+
+    for file in parquet_files:
+        df = pd.read_parquet(file, engine='fastparquet')
+        fileid = file.stem.split('_')[-1]
+        df['FileID'] = fileid
+        df = clean_trackpy_data(df, exposure_time=exposure_time)
+        df['UID'] = df['FileID'] + '-' + df['TrackID']
+        dfs.append(df)
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    return df

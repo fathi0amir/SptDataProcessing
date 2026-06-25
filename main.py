@@ -43,7 +43,7 @@ reload_modules()
 # MARK: Load data
 # Load the CSV files from the specified directory
 data_path = Path(r"F:\Amir\PhaseSeperation\DOPC_20260115")
-df = dpp.load_csv_files(data_path)
+df = dpp.load_trackmate_csv_files(data_path)
 
 df.info()
 df.head(20)
