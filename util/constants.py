@@ -2,7 +2,7 @@
 This file contains all the constants used in the project.
 """
 
-DT = 0.033  # Time interval between frames in seconds
+DT = 0.02  # Time interval between frames in seconds
 MSD_LENGTH_DIVISOR = 0.5  # The maximum lag time is set to 60% of the total time
 # Thresholds for alpha values
 
