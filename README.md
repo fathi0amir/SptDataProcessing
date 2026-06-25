@@ -13,12 +13,18 @@
 - **nbformat**: For Jupyter notebook formatting.
 - **pyarrow**: For reading and writing data in various formats.
 
-for convinience run these commands to install the packages:
+For convenience run these commands to install the packages:
 
 ```bash
 conda install -c conda-forge pandas numpy==2.2 plotly plotly-resampler holoviews scipy lmfit jupyter nbformat pyarrow datashader
 pip install kaleido
 ```
+
+Or using `uv` (after creating the environment):
+
+```bash
+uv add jupyter holoviews datashader plotly plotly-resampler lmfit altair vegafusion fastparquet
+``` 
 
 ## Columns
 
