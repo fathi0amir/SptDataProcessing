@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import param
 from scipy.optimize import curve_fit
+from scipy.spatial.distance import pdist
 from lmfit import Model, Parameters
 
 import util.constants as const
@@ -46,7 +47,7 @@ def calculate_msd(df) -> pd.DataFrame:
 # MARK: Diffusion Coefficient Calculation
 def normal_diffusion_msd(t, d):
     """
-    Calculate the mean squared displacement for normal diffusion in 2D.
+    Normal diffusion in 2D.
     Parameters:
         t (float): Time lag.
         d (float): Diffusion coefficient.
@@ -57,7 +58,7 @@ def normal_diffusion_msd(t, d):
 
 def anomalous_diffusion_msd(t, d, a):
     """
-    Calculate the mean squared displacement for anomalous diffusion in 2D.
+    Anomalous diffusion in 2D.
     Parameters:
         t (float): Time lag.
         d (float): Diffusion coefficient.
@@ -934,3 +935,72 @@ def calculate_flag_percentages(df):
     flag_counts = uid_flags.value_counts()
     flag_percentages = (flag_counts / flag_counts.sum() * 100).round(2)
     return flag_percentages
+
+
+def drop_short_trajectories(df, min_length=const.MIN_TRAJECTORY_LENGTH):
+    """
+    Drop trajectories that are shorter than a specified minimum length.
+    
+    Parameters:
+    df (pd.DataFrame): DataFrame with columns ['Frame', 'X', 'Y', 'UID']
+    min_length (int): Minimum number of frames required for a trajectory to be kept
+    
+    Returns:
+    pd.DataFrame: Filtered DataFrame with only trajectories longer than min_length
+    """
+    # Count the number of frames for each UID
+    trajectory_lengths = df.groupby('UID').size()
+    
+    # Identify UIDs that meet the minimum length requirement
+    valid_uids = trajectory_lengths[trajectory_lengths >= min_length].index
+    
+    # Filter the DataFrame to keep only valid UIDs
+    filtered_df = df[df['UID'].isin(valid_uids)].reset_index(drop=True)
+    
+    return filtered_df
+
+def drop_stationary_trajectories(df, min_displacement=const.LOCALIZATION_PRECISION_NM):
+    """
+    Drop trajectories that are considered stationary based on their maximum displacement.
+    
+    Parameters:
+    df (pd.DataFrame): DataFrame with columns ['Frame', 'X', 'Y', 'UID']
+    min_displacement (float): Minimum displacement required for a trajectory to be kept
+    
+    Returns:
+    pd.DataFrame: Filtered DataFrame with only non-stationary trajectories
+    """
+    # 1. Compute the bounding diameter for each UID
+    diameter_per_uid = (
+        df.groupby('UID')
+        .apply(lambda g: np.sqrt((g['X'].max() - g['X'].min())**2 +
+                                (g['Y'].max() - g['Y'].min())**2))
+        .rename('diameter')
+)
+    
+    # 2. Find UIDs that actually move beyond the localization precision
+    moving_uids = diameter_per_uid[diameter_per_uid >= min_displacement].index
+
+    
+    # 3. Filter the original dataframe
+    df = df[df['UID'].isin(moving_uids)].copy()
+        
+    return df
+
+def drop_stationary_trajectories2(df, min_displacement=const.LOCALIZATION_PRECISION_NM):
+    """
+    Alternative stationary trajectory filtering: Maximum pairwise distance (true diameter)
+    If you want the actual maximum distance between any two points in the track. Here 
+    Maximum pairwise distance is the largest Euclidean distance between any two points in that trajectory.
+    """
+    def track_diameter(g):
+        coords = g[['X', 'Y']].to_numpy()
+        if len(coords) < 2:
+            return 0.0
+        return pdist(coords).max()
+    
+    diameter_per_uid = df.groupby('UID').apply(track_diameter).rename('diameter')
+    moving_uids = diameter_per_uid[diameter_per_uid >= min_displacement].index
+    df = df[df['UID'].isin(moving_uids)].copy()
+
+    return df

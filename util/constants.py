@@ -11,6 +11,9 @@ MSD_LENGTH_DIVISOR = 0.5  # The maximum lag time is set to 60% of the total time
 # otherwise, if the data is in micrometers, set it to 1
 NANOMETER_TO_MICROMETER = 0.001  # Conversion factor from nanometers to micrometers
 
+LOCALIZATION_PRECISION_NM = 50 # Localization precision in nanometers, used for filtering stationary tracks.
+MIN_TRAJECTORY_LENGTH = 40 # Minimum number of frames for a trajectory to be considered valid
+
 ALPHA_THRESHOLDS = {
     # between 0.8 and 1.2 is considered normal diffusion
     'ignore': 0.3,  # Ignore tracks with alpha <= 0.3

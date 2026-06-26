@@ -122,6 +122,8 @@ def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033, suffix: st
 
     """
     Load and combine multiple Parquet files from a specified directory into a single DataFrame.
+
+    The data from TrackPy is in pixels, so the X and Y coordinates are multiplied by 65 to convert them to nanometers.
     """
     path = Path(data_wd)
     parquet_files = path.glob('*.parquet')
