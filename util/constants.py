@@ -5,6 +5,7 @@ This file contains all the constants used in the project.
 DT = 0.02  # Time interval between frames in seconds
 MSD_LENGTH_DIVISOR = 0.5  # The maximum lag time is set to 60% of the total time
 # Thresholds for alpha values
+PIXEL_IN_NM = 65  # Conversion factor from pixels to nanometers
 
 # Nanometer to micrometer conversion factor if needed
 # If the trackmate data is in nanometers put this value to 0.001

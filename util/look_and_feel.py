@@ -1,7 +1,7 @@
 """
 A place to put all the plot styling to visualize settings.
 """
-
+from copy import copy
 # Import necessary libraries
 import plotly.express as px
 import numpy as np
@@ -9,6 +9,9 @@ import pandas as pd
 import altair as alt
 import vegafusion  # noqa: F401
 import holoviews as hv
+from bokeh.themes import Theme
+from bokeh.models import LinearAxis, LogAxis
+
 hv.extension('bokeh')  # type: ignore
 # from plotly_resampler import FigureResampler, FigureWidgetResampler
 # from plotly_resampler import register_plotly_resampler, unregister_plotly_resampler
@@ -474,3 +477,117 @@ def holoviz_plot_msd_loglog_fast(df, bin_num=200):
     )
 
     return heatmap
+
+
+# Defualt DPI for web standard is 96 (can be stimates as 100 pixels per 25 mm)
+HV_BOKEH_BASIC = hv.opts(
+    width=800,
+    height=600,
+    fontsize=12,
+    fontscale=2.0,
+    # logx=False,
+    # logy=False,
+    backend_opts={
+        "plot.output_backend": "svg",
+        # "plot.title.text_font": "Noto Sans",
+        # "plot.background_fill_color": '#2F2F2F',
+        # "plot.border_fill_color": '#2F2F2F',
+        # "plot.outline_line_color": '#444444',
+        # "axis.axis_line_color": None,
+        # "plot.xaxis.axis_label_text_font": "Noto Sans",
+        # "plot.yaxis.axis_label_text_font": "Noto Sans",
+        # "plot.xaxis.major_label_text_font": "Noto Sans",
+        # "plot.yaxis.major_label_text_font": "Noto Sans",
+        # "plot.legend.label_text_font": "Noto Sans",
+        # "plot.legend.title_text_font": "Noto Sans",
+    },
+)
+
+HV_BOKEH_CURVE = hv.opts.Curve(
+    line_width=2,
+)
+
+
+def bokeh_add_topright_linear_axes(plot, element):
+    p = plot.handles['plot']
+
+    # Clone ticker and formatter from existing axes
+    top_axis = LinearAxis(
+        ticker=copy(p.xaxis[0].ticker),
+        formatter=copy(p.xaxis[0].formatter),
+        major_label_text_font_size="0pt",  # Hide labels on the top axis
+        # axis_label=p.xaxis[0].axis_label,
+    )
+    right_axis = LinearAxis(
+        ticker=copy(p.yaxis[0].ticker),
+        formatter=copy(p.yaxis[0].formatter),
+        major_label_text_font_size="0pt",  # Hide labels on the right axis
+        # axis_label=p.yaxis[0].axis_label,
+    )
+
+    p.add_layout(top_axis, 'above')
+    p.add_layout(right_axis, 'right')
+
+def bokeh_add_topright_log_axes(plot, element):
+    p = plot.handles['plot']
+
+    # Clone ticker and formatter from existing axes
+    top_axis = LogAxis(
+        ticker=copy(p.xaxis[0].ticker),
+        formatter=copy(p.xaxis[0].formatter),
+        major_label_text_font_size="0.01pt",  # Hide labels on the top axis
+        major_label_text_alpha=0,  # Hide labels on the top axis
+        # axis_label=p.xaxis[0].axis_label,
+    )
+    right_axis = LogAxis(
+        ticker=copy(p.yaxis[0].ticker),
+        formatter=copy(p.yaxis[0].formatter),
+        major_label_text_font_size="0.01pt",  # Hide labels on the right axis
+        major_label_text_alpha=0,  # Hide labels on the right axis
+        # axis_label=p.yaxis[0].axis_label,
+    )
+
+    p.add_layout(top_axis, 'above')
+    p.add_layout(right_axis, 'right')
+
+
+
+def bokeh_add_topright_logxliny_axes(plot, element):
+    fig = plot.state
+
+    # Right axis — mirrors the (linear) y-range
+    fig.extra_y_ranges = {'y2': fig.y_range}
+    right_axis = LinearAxis(
+        y_range_name='y2', 
+        ticker=fig.yaxis[0].ticker, 
+        major_label_text_font_size='1pt',
+        major_label_text_alpha=0)
+    fig.add_layout(right_axis, 'right')
+
+    # Top axis — mirrors the (log) x-range
+    fig.extra_x_ranges = {'x2': fig.x_range}
+    top_axis = LogAxis(
+        x_range_name='x2', 
+        ticker=fig.xaxis[0].ticker, 
+        major_label_text_font_size='1pt', 
+        major_label_text_alpha=0)
+    fig.add_layout(top_axis, 'above')
+
+
+
+def move_axes_topleft(plot, element):
+    """Hook to add mirrored top and right axes."""
+    p = plot.handles['plot']  # Get the underlying Bokeh figure
+    
+    # Add right axis (mirrors left/y-axis)
+    p.add_layout(p.yaxis[0], 'right')   # or LinearAxis(), if you want a separate one
+    
+    # Add top axis (mirrors bottom/x-axis)
+    p.add_layout(p.xaxis[0], 'above')
+
+
+def set_legend_top_horizontal(plot, element):
+    p = plot.handles['plot']
+    if p.legend:
+        p.legend[0].orientation = 'horizontal'
+        p.legend[0].location = 'top_center'

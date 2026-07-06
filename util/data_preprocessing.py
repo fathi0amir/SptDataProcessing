@@ -37,6 +37,9 @@ def clean_data(df)->pd.DataFrame:
     df = df.dropna(subset=['TRACK_ID'])
     df = df.rename(columns={'TRACK_ID': 'TrackID', 'POSITION_X': 'X',
                             'POSITION_Y': 'Y', 'POSITION_T': 'T', 'FRAME': 'Frame'})
+    
+    df = df.sort_values(by=['TrackID', 'Frame']).reset_index(drop=True)
+
     return df
 
 def sort_by_frame(df: pd.DataFrame)->pd.DataFrame:
@@ -83,10 +86,13 @@ def load_trackmate_csv_files(csv_root)->pd.DataFrame:
 
     for file in csv_files:
         df = pd.read_csv(file, engine='pyarrow')
-        df['FileID'] = file.stem
+        if df.empty:
+            print(f"Warning: {file} is empty and will be skipped.")
+            continue
         df = clean_data(df)
-        df = df.sort_values(by='TrackID')
-        df = sort_by_frame(df)
+        df['FileID'] = file.stem
+        # df = df.sort_values(by='TrackID') # Deprecated: Sorting by TrackID is now handled in the clean_data function
+        # df = sort_by_frame(df) # Deprecated: Sorting by frame is now handled in the clean_data function
         dfs.append(df)
 
     df = pd.concat(dfs, ignore_index=True)
@@ -118,7 +124,7 @@ def clean_trackpy_data(df: pd.DataFrame, exposure_time: float = 0.033)->pd.DataF
 
     return df
 
-def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033, suffix: str = None)->pd.DataFrame:
+def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033, pixel_in_nm: float = 65, suffix: str = None)->pd.DataFrame:
 
     """
     Load and combine multiple Parquet files from a specified directory into a single DataFrame.
@@ -141,6 +147,6 @@ def load_trackpy_parquet(data_wd: Path, exposure_time: float = 0.033, suffix: st
         dfs.append(df)
 
     df = pd.concat(dfs, ignore_index=True)
-    df[['X', 'Y']] *= 65
+    df[['X', 'Y']] *= pixel_in_nm 
 
     return df

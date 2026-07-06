@@ -11,9 +11,69 @@ from lmfit import Model, Parameters
 import util.constants as const
 
 
-
-
 def calculate_msd(df) -> pd.DataFrame:
+    """
+    Calculate the Mean Squared Displacement (MSD) for a single particle trajectory.
+
+    This function computes the MSD for various time lags. To account for missing frames 
+    in the trajectory, it uses a frame-to-index mapping to ensure that displacements 
+    are calculated between points separated by the exact physical time lag, 
+    rather than simply by row index.
+
+    The maximum lag time is limited to a percentage of the total trajectory length 
+    (defined by `const.MSD_LENGTH_DIVISOR`) to ensure statistical reliability, 
+    as the number of available pairs decreases as lag increases.
+
+    Parameters:
+        df (pd.DataFrame): DataFrame containing the trajectory data. 
+                           Must include columns:
+                           - 'Frame': The frame number (used to calculate actual time lag).
+                           - 'X': X-coordinate of the particle.
+                           - 'Y': Y-coordinate of the particle.
+
+    Returns:
+        pd.DataFrame: The original DataFrame with two additional columns:
+                      - 'MSD': The calculated Mean Squared Displacement for that lag.
+                      - 'Lag_T': The physical time lag in seconds.
+    """
+    # ... (keep existing docstring and initial variables)
+    dt = const.DT
+    cf = const.NANOMETER_TO_MICROMETER 
+    max_lag = round(const.MSD_LENGTH_DIVISOR * len(df))
+   
+    frame_map = {frame: idx for idx, frame in enumerate(df['Frame'])}
+    frames = df['Frame'].values
+    x = df['X'].values
+    y = df['Y'].values
+
+    msd_results = {}
+    for lag in range(1, max_lag + 1):
+        displacements = []
+        for i in range(len(df)):
+            target_frame = frames[i] + lag
+            if target_frame in frame_map:
+                j = frame_map[target_frame]
+                # Calculate squared displacement and convert to microns
+                dist_sq = ((x[j] - x[i]) * cf)**2 + ((y[j] - y[i]) * cf)**2
+                displacements.append(dist_sq)
+        
+        if displacements:
+            msd_results[lag] = np.mean(displacements)
+        else:
+            msd_results[lag] = np.nan
+        # ------------------------------------------
+
+    # ... (keep the rest of the function as is)
+    msd_df = pd.DataFrame(list(msd_results.items()), columns=['Lag_T', 'MSD'])
+    msd_df['Lag_T'] = msd_df['Lag_T'] * dt
+    
+    df = df.reset_index(drop=True)
+    df["MSD"] = msd_df["MSD"].reset_index(drop=True)
+    df["Lag_T"] = msd_df["Lag_T"].reset_index(drop=True)
+    
+    return df
+
+def calculate_msd_old(df) -> pd.DataFrame:
     """
     Calculate the Mean Squared Displacement (MSD) for a given DataFrame.
     The maximum lag time is set to 60% of the total time. If its more than this, 
@@ -1004,3 +1064,182 @@ def drop_stationary_trajectories2(df, min_displacement=const.LOCALIZATION_PRECIS
     df = df[df['UID'].isin(moving_uids)].copy()
 
     return df
+
+def log_binned_histogram(df, column, min_log_d=-4, max_log_d=1, bins_per_decade=10):
+
+    
+    num_bins = int((max_log_d - min_log_d) * bins_per_decade)
+    np.logspace(min_log_d, max_log_d, num_bins)
+    d_vals = df.groupby('UID')[column].first()
+    hist, edges = np.histogram(d_vals, bins=np.logspace(min_log_d, max_log_d, num_bins))
+
+    return hist, edges
+
+def linear_binned_histogram(df, column, min_d=0, max_d=2, bin_width=0.01):
+    """
+    Create a linear-binned histogram for a specified column in the DataFrame.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing the data.
+        column (str): Name of the column to create the histogram for.
+        min_d (float): Minimum value for the histogram bins.
+        max_d (float): Maximum value for the histogram bins.
+        bin_width (float): Width of each bin in the histogram.
+    
+    Returns:
+        hist (np.ndarray): Histogram array.
+        edges (np.ndarray): Bin edges for the histogram.
+    """
+    num_bins = int((max_d - min_d) / bin_width)
+    edges = np.linspace(min_d, max_d, num_bins + 1)
+    d_vals = df.groupby('UID')[column].first()
+    hist, edges = np.histogram(d_vals, bins=edges)
+
+    return hist, edges
+
+def log_binned_histogram2d(df, x_column, y_column, bins_per_decade=10):
+    """
+    Create a 2D log-binned histogram for two specified columns in the DataFrame.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing the data.
+        x_column (str): Name of the column for the x-axis.
+        y_column (str): Name of the column for the y-axis.
+        x_min_log_d (float): Minimum log value for the x-axis.
+        x_max_log_d (float): Maximum log value for the x-axis.
+        y_min_log_d (float): Minimum log value for the y-axis.
+        y_max_log_d (float): Maximum log value for the y-axis.
+        bins_per_decade (int): Number of bins per decade for both axes.
+    
+    Returns:
+        hist (np.ndarray): 2D histogram array.
+        x_edges (np.ndarray): Bin edges for the x-axis.
+        y_edges (np.ndarray): Bin edges for the y-axis.
+    """
+    x_vals = df[x_column].to_numpy()
+    y_vals = df[y_column].to_numpy()
+
+    x_vals = x_vals[np.isfinite(x_vals) & (x_vals > 0)]
+    y_vals = y_vals[np.isfinite(y_vals) & (y_vals > 0)]
+
+    if x_vals.size == 0 or y_vals.size == 0:
+        raise ValueError("Both x and y columns must contain at least one positive finite value for log-binned histogram.")
+
+    x_min_log = int(np.floor(np.log10(x_vals.min())))
+    x_max_log = int(np.ceil(np.log10(x_vals.max())))
+    y_min_log = int(np.floor(np.log10(y_vals.min())))
+    y_max_log = int(np.ceil(np.log10(y_vals.max())))
+
+    num_x_bins = max(2, int((x_max_log - x_min_log) * bins_per_decade) + 1)
+    num_y_bins = max(2, int((y_max_log - y_min_log) * bins_per_decade) + 1)
+
+    x_edges = np.logspace(x_min_log, x_max_log, num_x_bins)
+    y_edges = np.logspace(y_min_log, y_max_log, num_y_bins)
+    
+    hist, x_edges, y_edges = np.histogram2d(df[x_column], df[y_column], bins=[x_edges, y_edges])
+    
+    return hist, x_edges, y_edges
+
+def lin_binned_histogram2d(df, x_column, y_column, x_bin_width=0.01, y_bin_width=0.01):
+    """
+    Create a 2D linear-binned histogram for two specified columns in the DataFrame.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing the data.
+        x_column (str): Name of the column for the x-axis.
+        y_column (str): Name of the column for the y-axis.
+        x_bin_width (float): Width of each bin for the x-axis.
+        y_bin_width (float): Width of each bin for the y-axis.
+
+    Returns:
+        hist (np.ndarray): 2D histogram array.
+        x_edges (np.ndarray): Bin edges for the x-axis.
+        y_edges (np.ndarray): Bin edges for the y-axis.
+    """
+    x_vals = df[x_column].to_numpy()
+    y_vals = df[y_column].to_numpy()
+
+    x_vals = x_vals[np.isfinite(x_vals) & (x_vals > 0)]
+    y_vals = y_vals[np.isfinite(y_vals) & (y_vals > 0)]
+
+    if x_vals.size == 0 or y_vals.size == 0:
+        raise ValueError("Both x and y columns must contain at least one positive finite value for linear-binned histogram.")
+
+    x_min = x_vals.min()
+    x_max = x_vals.max()
+    y_min = y_vals.min()
+    y_max = y_vals.max()
+
+    num_x_bins = int((x_max - x_min) / x_bin_width)
+    num_y_bins = int((y_max - y_min) / y_bin_width)
+
+    x_edges = np.linspace(x_min, x_max, num_x_bins)
+    y_edges = np.linspace(y_min, y_max, num_y_bins)
+
+    hist, x_edges, y_edges = np.histogram2d(df[x_column], df[y_column], bins=[x_edges, y_edges])
+    
+    return hist, x_edges, y_edges
+
+
+def domain_diff_type_stacked_df(df):
+    """
+    Build a stacked-bar-ready DataFrame of diffusion-type proportions per trajectory label.
+
+    This function:
+    1. Counts unique trajectories (by ``UID``) for each ``traj_label`` and
+       ``Alpha_Flag_Fit`` category.
+    2. Removes the ``ignore`` category.
+    3. Normalizes counts within each ``traj_label`` to proportions.
+    4. Returns a long-format DataFrame with stacked-bar helper columns,
+       including label positions and formatted percentage labels.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing at least the columns:
+        ``traj_label``, ``Alpha_Flag_Fit``, and ``UID``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Long-format DataFrame with columns:
+        - ``traj_label``: trajectory group label.
+        - ``Alpha_Flag_Fit``: diffusion-type category.
+        - ``Proportion``: normalized proportion in each stack segment.
+        - ``bar_bottom``: bottom y-position of each stacked segment.
+        - ``label_y_pos``: centered y-position for text labels.
+        - ``label``: percentage text (blank for segments < 5%).
+    """
+
+    
+
+    # 1. Count trajectories by traj_label and Alpha_Flag_Fit
+    counts = df.groupby(['traj_label', 'Alpha_Flag_Fit'])['UID'].nunique().unstack(fill_value=0)
+    counts = counts.drop('ignore', axis=1)
+
+    # 2. Normalize each row to get proportions
+    normalized = counts.div(counts.sum(axis=1), axis=0)
+
+    # 3. Convert to long format
+    plot_df = normalized.reset_index().melt(
+        id_vars='traj_label',
+        var_name='Alpha_Flag_Fit',
+        value_name='Proportion'
+    )
+
+    # 4. Compute y-position for labels (middle of each stacked segment)
+    plot_df['bar_bottom'] = plot_df.groupby('traj_label')['Proportion'].transform('cumsum') - plot_df['Proportion']
+    plot_df['label_y_pos'] = plot_df['bar_bottom'] + plot_df['Proportion'] / 2
+
+    # 5. Format labels as percentages
+    plot_df['label'] = (plot_df['Proportion'] * 100).round(1).astype(str) + '%'
+
+    # Optional: hide labels for very thin segments where they won't fit
+    plot_df.loc[plot_df['Proportion'] < 0.04, 'label'] = ''
+
+    # Reorder traj_label for plotting
+    order = ['in', 'cross', 'out']
+    plot_df['traj_label'] = pd.Categorical(plot_df['traj_label'], categories=order, ordered=True)
+    plot_df = plot_df.sort_values(['traj_label', 'Alpha_Flag_Fit'])
+
+    return plot_df

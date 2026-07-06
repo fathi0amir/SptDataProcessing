@@ -1,0 +1,85 @@
+attrs:
+
+  Plot:
+    background_fill_color: "#1E1E1E"
+    border_fill_color:     "#2A2A2A"
+    outline_line_color:    "#3A3A3A"
+    outline_line_alpha:    1.0
+    outline_line_width:    1
+
+  Axis:
+    # Axis line
+    axis_line_color:            "#FFFFFF"
+    axis_line_alpha:            1.0
+    axis_line_width:            1
+
+    # Axis label (e.g. "X Label" / "Y Label")
+    axis_label_text_color:      "#FFFFFF"
+    axis_label_text_font:       "Noto Sans"
+    axis_label_text_font_size:  "12pt"
+    axis_label_text_font_style: "normal"
+    axis_label_standoff:        10
+
+    # Tick labels (the numbers/categories along axes)
+    major_label_text_color:      "#FFFFFF"
+    major_label_text_font:       "Noto Sans"
+    major_label_text_font_size:  "10pt"
+    major_label_text_font_style: "normal"
+
+    # Major ticks
+    major_tick_line_color: "#FFFFFF"
+    major_tick_line_alpha: 1.0
+    major_tick_line_width: 1
+    major_tick_in:         6
+    major_tick_out:        0
+
+    # Minor ticks
+    minor_tick_line_color: "#FFFFFF"
+    minor_tick_line_alpha: 1.0
+    minor_tick_line_width: 1
+    minor_tick_in:         3
+    minor_tick_out:        0
+
+  Grid:
+    # Major gridlines — disabled
+    grid_line_color: null
+
+    # Minor gridlines — disabled
+    minor_grid_line_color: null
+
+    # Alternating bands — disabled
+    band_fill_color: null
+    band_fill_alpha: 0.0
+
+  Title:
+    text_color:      "#FFFFFF"
+    text_font:       "Noto Sans"
+    text_font_size:  "16pt"
+    text_font_style: "bold"
+    text_alpha:      1.0
+    align:           "left"
+    offset:          0
+
+  Legend:
+    label_text_color:      "#FFFFFF"
+    label_text_font:       "Noto Sans"
+    label_text_font_size:  "10pt"
+    label_text_font_style: "normal"
+    border_line_color:     "#555555"
+    border_line_alpha:     1.0
+    border_line_width:     1
+    background_fill_color: "#2A2A2A"
+    background_fill_alpha: 0.9
+    glyph_width:           20
+
+  ColorBar:
+    major_label_text_color:    "#FFFFFF"
+    major_label_text_font:     "Noto Sans"
+    major_label_text_font_size: "10pt"
+    title_text_color:          "#FFFFFF"
+    title_text_font:           "Noto Sans"
+    title_text_font_size:      "11pt"
+    title_text_font_style:     "normal"
+    bar_line_color:            null
+    background_fill_color:     "#2A2A2A"
+    background_fill_alpha:     0.9
