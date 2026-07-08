@@ -591,3 +591,4 @@ def set_legend_top_horizontal(plot, element):
     if p.legend:
         p.legend[0].orientation = 'horizontal'
         p.legend[0].location = 'top_center'
+        p.legend[0].title=''
