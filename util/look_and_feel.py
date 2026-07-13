@@ -507,6 +507,12 @@ HV_BOKEH_CURVE = hv.opts.Curve(
     line_width=2,
 )
 
+def bokeh_remove_bottomleft_labels(plot, element):
+    p = plot.handles['plot']
+    p.xaxis[0].major_label_text_font_size = "0pt"  # Hide x-axis labels
+    p.yaxis[0].major_label_text_font_size = "0pt"  # Hide y-axis labels
+    p.xaxis[0].major_label_text_alpha = 0  # Hide x-axis labels
+    p.yaxis[0].major_label_text_alpha = 0  # Hide y-axis labels
 
 def bokeh_add_topright_linear_axes(plot, element):
     p = plot.handles['plot']
@@ -517,12 +523,14 @@ def bokeh_add_topright_linear_axes(plot, element):
         formatter=copy(p.xaxis[0].formatter),
         major_label_text_font_size="0pt",  # Hide labels on the top axis
         # axis_label=p.xaxis[0].axis_label,
+        major_label_text_alpha = 0
     )
     right_axis = LinearAxis(
         ticker=copy(p.yaxis[0].ticker),
         formatter=copy(p.yaxis[0].formatter),
         major_label_text_font_size="0pt",  # Hide labels on the right axis
         # axis_label=p.yaxis[0].axis_label,
+        major_label_text_alpha = 0
     )
 
     p.add_layout(top_axis, 'above')

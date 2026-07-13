@@ -787,6 +787,24 @@ def calc_d_fix_alpha(df):
     return df
 
 
+def conf_calc_msd(lag_points, df):
+    '''
+    Calculate the Mean Squared Displacement (MSD) for the whole trajectory (not the segment).
+    It calculates the MSD for each lag point from 1 to lag_points.
+    Parameters:
+        lag_points (int): The number of lag points to consider.
+        df (pd.DataFrame): The DataFrame containing the trajectory data.
+    Returns:
+        dict: A dictionary with lag points as keys and their corresponding MSD values.
+    '''
+    msd = {}
+    for lag in range(1, lag_points + 1):
+        dy = df['Y'].diff(periods=lag).fillna(0)
+        dx = df['X'].diff(periods=lag).fillna(0)
+        msd[lag] = (dx**2 + dy**2).mean()
+    return msd
+
+
 def calc_confinement_level(df):
     """ Calculate the confinement level for each segment of the trajectory.
     This function computes the confinement level based on the diffusion coefficient
@@ -834,22 +852,6 @@ def calc_confinement_level(df):
 
     return df
 
-def conf_calc_msd(lag_points, df):
-    '''
-    Calculate the Mean Squared Displacement (MSD) for the whole trajectory (not the segment).
-    It calculates the MSD for each lag point from 1 to lag_points.
-    Parameters:
-        lag_points (int): The number of lag points to consider.
-        df (pd.DataFrame): The DataFrame containing the trajectory data.
-    Returns:
-        dict: A dictionary with lag points as keys and their corresponding MSD values.
-    '''
-    msd = {}
-    for lag in range(1, lag_points + 1):
-        dy = df['Y'].diff(periods=lag).fillna(0)
-        dx = df['X'].diff(periods=lag).fillna(0)
-        msd[lag] = (dx**2 + dy**2).mean()
-    return msd
 
 def conf_calc_r(segment):
     '''
@@ -1243,3 +1245,204 @@ def domain_diff_type_stacked_df(df):
     plot_df = plot_df.sort_values(['traj_label', 'Alpha_Flag_Fit'])
 
     return plot_df
+
+def _get_time_averaged_msd(df_trajectory):
+    """
+    Retrieves the pre-calculated Time-Averaged Mean Squared Displacement (TAMSD)
+    for a single particle trajectory from the 'MSD' and 'Lag_T' columns.
+    
+    Parameters:
+        df_trajectory (pd.DataFrame): DataFrame for a single trajectory,
+                                      expected to have 'MSD' and 'Lag_T' columns.
+                                      
+    Returns:
+        pd.Series: A Series with 'MSD' values indexed by 'Lag_T'.
+                   NaN values in MSD are dropped.
+    """
+    if 'MSD' not in df_trajectory.columns or 'Lag_T' not in df_trajectory.columns:
+        raise ValueError("Input DataFrame for _get_time_averaged_msd must contain 'MSD' and 'Lag_T' columns.")
+    
+    # The 'MSD' column for a single trajectory is its TAMSD.
+    # We set 'Lag_T' as index for easier alignment during ensemble averaging.
+    return df_trajectory.set_index('Lag_T')['MSD'].dropna()
+
+def _calculate_ensemble_averaged_msd_average(df_ensemble):
+    """
+    Calculates the Ensemble-Averaged Mean Squared Displacement (EAMSD)
+    by averaging the 'MSD' curves (which are TAMSD for individual trajectories)
+    of multiple trajectories in the ensemble.
+    
+    Parameters:
+        df_ensemble (pd.DataFrame): DataFrame containing multiple trajectories,
+                                    each with 'UID', 'Lag_T', and 'MSD' columns.
+                                    
+    Returns:
+        pd.Series: EAMSD values indexed by 'Lag_T'. Returns an empty Series if no data.
+    """
+    if df_ensemble.empty:
+        return pd.Series(dtype=float, name='EAMSD_Average')
+
+    # Collect individual MSD curves (TAMSDs) for all unique UIDs in the ensemble
+    all_msd_curves = []
+    for uid in df_ensemble['UID'].unique():
+        # Use the helper to get the TAMSD for each trajectory
+        traj_msd_series = _get_time_averaged_msd(df_ensemble[df_ensemble['UID'] == uid])
+        if not traj_msd_series.empty:
+            all_msd_curves.append(traj_msd_series)
+
+    if not all_msd_curves:
+        return pd.Series(dtype=float, name='EAMSD_Average')
+
+    # Concatenate all TAMSD series and calculate the mean for each Lag_T.
+    # pd.concat with axis=1 automatically aligns by index (Lag_T).
+    combined_msd_series = pd.concat(all_msd_curves, axis=1)
+    eamsd_series = combined_msd_series.mean(axis=1)
+    eamsd_series.name = 'EAMSD_Average' # Name the series for clarity
+    return eamsd_series
+
+def calculate_ergodicity_parameters(df):
+    """
+    Calculates ergodicity parameters for each trajectory based on pre-calculated
+    Time-Averaged Mean Squared Displacement (TAMSD) and Ensemble-Averaged
+    Mean Squared Displacement (EAMSD).
+    
+    The function adds the following columns directly to the input DataFrame:
+    - 'EAMSD_All': Ensemble-Averaged MSD across all trajectories for each Lag_T.
+    - 'Ergodicity_All': TAMSD / EAMSD_All for each trajectory.
+    - 'EAMSD_Group': Ensemble-Averaged MSD for the trajectory's specific group (if 'traj_label' exists).
+    - 'Ergodicity_Group': TAMSD / EAMSD_Group for each trajectory within its group.
+    
+    Parameters:
+        df (pd.DataFrame): The input DataFrame containing single particle tracking data.
+                           Must include 'UID', 'Lag_T', and 'MSD' columns.
+                           Optionally includes 'traj_label' for group-specific analysis.
+                           
+    Returns:
+        pd.DataFrame: The original DataFrame with added ergodicity-related columns.
+        
+    Raises:
+        ValueError: If 'MSD' or 'Lag_T' columns are missing.
+    """
+    if 'MSD' not in df.columns or 'Lag_T' not in df.columns:
+        raise ValueError("DataFrame must contain 'MSD' and 'Lag_T' columns for ergodicity calculation.")
+
+    # Calculate global EAMSD once for the entire DataFrame
+    global_eamsd_series = _calculate_ensemble_averaged_msd_average(df)
+    global_eamsd_dict = global_eamsd_series.to_dict()
+
+    # Initialize new columns with NaN to ensure they exist before assignment
+    df['EAMSD_All'] = np.nan
+    df['Ergodicity_All'] = np.nan
+
+    group_eamsd_dicts = {}
+    if 'traj_label' in df.columns:
+        df['EAMSD_Group'] = np.nan
+        df['Ergodicity_Group'] = np.nan
+        # Calculate EAMSD for each 'traj_label' group
+        for label, group_df in df.groupby('traj_label'):
+            group_eamsd_series = _calculate_ensemble_averaged_msd_average(group_df)
+            group_eamsd_dicts[label] = group_eamsd_series.to_dict()
+
+    # Apply calculations for each individual trajectory
+    for uid, traj_df in df.groupby('UID'):
+        # Get the TAMSD for this specific trajectory
+        tamsd_series = _get_time_averaged_msd(traj_df)
+        
+        # If the trajectory's TAMSD is empty, skip to the next UID
+        if tamsd_series.empty:
+            continue
+
+        # Get the original DataFrame indices for this trajectory that have valid Lag_T values
+        # This is crucial for correctly mapping values back to the original df
+        valid_lag_t_indices = traj_df[traj_df['Lag_T'].isin(tamsd_series.index)].index
+
+        # Map global EAMSD values to the trajectory's Lag_T values
+        eamsd_all_mapped = pd.Series(tamsd_series.index.map(global_eamsd_dict).values, index=tamsd_series.index)
+        
+        # Calculate Ergodicity_All
+        # Handle potential division by zero or NaN if EAMSD_All is zero/NaN
+        ergodicity_all_values = tamsd_series / eamsd_all_mapped
+        
+        # Assign back to the original DataFrame using the original index
+        df.loc[valid_lag_t_indices, 'EAMSD_All'] = eamsd_all_mapped.loc[traj_df.loc[valid_lag_t_indices, 'Lag_T']].values
+        df.loc[valid_lag_t_indices, 'Ergodicity_All'] = ergodicity_all_values.loc[traj_df.loc[valid_lag_t_indices, 'Lag_T']].values
+
+        if 'traj_label' in df.columns:
+            current_group_label = traj_df['traj_label'].iloc[0]
+            if current_group_label in group_eamsd_dicts:
+                group_eamsd_dict = group_eamsd_dicts[current_group_label]
+                eamsd_group_mapped = pd.Series(tamsd_series.index.map(group_eamsd_dict).values, index=tamsd_series.index)
+
+                # Calculate Ergodicity_Group
+                ergodicity_group_values = tamsd_series / eamsd_group_mapped
+
+                df.loc[valid_lag_t_indices, 'EAMSD_Group'] = eamsd_group_mapped.loc[traj_df.loc[valid_lag_t_indices, 'Lag_T']].values
+                df.loc[valid_lag_t_indices, 'Ergodicity_Group'] = ergodicity_group_values.loc[traj_df.loc[valid_lag_t_indices, 'Lag_T']].values
+                
+    return df
+
+
+def calculate_gyration_tensor_parameters(df_trajectory: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates gyration tensor parameters for a single trajectory and adds them to the DataFrame.
+
+    The gyration tensor characterizes the spatial extent and shape of a trajectory.
+    Key derived metrics include:
+    - Squared Radius of Gyration (Rg^2): A measure of the overall size of the trajectory.
+    - Eigenvalues (lambda1, lambda2): Represent the squared lengths of the principal semi-axes
+      of the equivalent ellipse that best describes the trajectory's shape.
+    - Anisotropy: A dimensionless measure (0 to 1) indicating the deviation from a spherical
+      (isotropic, Anisotropy=0) to a linear (highly anisotropic, Anisotropy=1) shape.
+
+    Args:
+        df_trajectory (pd.DataFrame): DataFrame containing a single trajectory with 'X' and 'Y' columns.
+
+    Returns:
+        pd.DataFrame: The input DataFrame with added columns for gyration tensor parameters:
+                      'Radius_of_Gyration_Sq', 'Eigenvalue1', 'Eigenvalue2', 'Anisotropy'.
+                      If a trajectory has fewer than 2 points, these columns will be NaN.
+    """
+    if len(df_trajectory) < 2: # At least 2 points are needed to define a gyration tensor meaningfully
+        df_trajectory['Radius_of_Gyration_Sq'] = np.nan
+        df_trajectory['Eigenvalue1'] = np.nan
+        df_trajectory['Eigenvalue2'] = np.nan
+        df_trajectory['Anisotropy'] = np.nan
+        return df_trajectory
+
+    # Center the coordinates relative to the trajectory's centroid
+    mean_x = df_trajectory['X'].mean()
+    mean_y = df_trajectory['Y'].mean()
+
+    dx = df_trajectory['X'] - mean_x
+    dy = df_trajectory['Y'] - mean_y
+
+    N = len(df_trajectory)
+
+    # Calculate components of the gyration tensor S_ab = (1/N) * sum(delta_a * delta_b)
+    Sxx = np.sum(dx**2) / N
+    Syy = np.sum(dy**2) / N
+    Sxy = np.sum(dx * dy) / N # Sxy = Syx
+
+    gyration_tensor = np.array([[Sxx, Sxy],
+                                [Sxy, Syy]])
+
+    # Calculate eigenvalues of the gyration tensor
+    eigenvalues = np.linalg.eigvals(gyration_tensor)
+    lambda1 = np.max(eigenvalues) # Larger eigenvalue
+    lambda2 = np.min(eigenvalues) # Smaller eigenvalue
+
+    # Calculate Squared Radius of Gyration: Rg^2 = trace(S) = lambda1 + lambda2
+    radius_of_gyration_sq = lambda1 + lambda2
+
+    # Calculate Anisotropy: (lambda1 - lambda2) / (lambda1 + lambda2)
+    # This metric ranges from 0 (circular/isotropic motion) to 1 (linear/anisotropic motion)
+    denominator = (lambda1 + lambda2)
+    anisotropy = (lambda1 - lambda2) / denominator if denominator != 0 else np.nan
+
+    # Add the results as new columns to all rows of the current trajectory's DataFrame
+    df_trajectory['Radius_of_Gyration_Sq'] = radius_of_gyration_sq
+    df_trajectory['Eigenvalue1'] = lambda1
+    df_trajectory['Eigenvalue2'] = lambda2
+    df_trajectory['Anisotropy'] = anisotropy
+
+    return df_trajectory
