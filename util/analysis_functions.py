@@ -141,11 +141,6 @@ def remove_msd_offset(df_trajectory: pd.DataFrame, replace: bool = True) -> pd.D
         # Handle cases where fitting might fail (e.g., all y_fit are NaN or non-finite)
         offset = np.nan
 
-    # to make sure the offset correction brings MSD to negative values, 
-    # we will set the offset to the minimum value of the MSD if it is less than that
-    if offset < y_fit.min():
-        offset = y_fit.min()
-
     # Subtract the offset from the entire MSD column to create 'MSD_NoOff'
     if replace:
         df_trajectory['MSD'] = df_trajectory['MSD'] - offset
@@ -1128,7 +1123,7 @@ def log_binned_histogram(df, column, min_log_d=-4, max_log_d=1, bins_per_decade=
 
     return hist, edges
 
-def linear_binned_histogram(df, column, min_d=0, max_d=2, bin_width=0.01):
+def linear_binned_histogram(df, column, min_d=0, max_d=2, bin_width=0.01, mean=False):
     """
     Create a linear-binned histogram for a specified column in the DataFrame.
     
@@ -1138,6 +1133,7 @@ def linear_binned_histogram(df, column, min_d=0, max_d=2, bin_width=0.01):
         min_d (float): Minimum value for the histogram bins.
         max_d (float): Maximum value for the histogram bins.
         bin_width (float): Width of each bin in the histogram.
+        mean (bool): If True, get the mean for each UID instead of the first value.
     
     Returns:
         hist (np.ndarray): Histogram array.
@@ -1145,7 +1141,10 @@ def linear_binned_histogram(df, column, min_d=0, max_d=2, bin_width=0.01):
     """
     num_bins = int((max_d - min_d) / bin_width)
     edges = np.linspace(min_d, max_d, num_bins + 1)
-    d_vals = df.groupby('UID')[column].first()
+    if mean:
+        d_vals = df.groupby('UID')[column].mean()
+    else:
+        d_vals = df.groupby('UID')[column].first()
     hist, edges = np.histogram(d_vals, bins=edges)
 
     return hist, edges
@@ -1351,7 +1350,81 @@ def _calculate_ensemble_averaged_msd_average(df_ensemble):
     eamsd_series.name = 'EAMSD_Average' # Name the series for clarity
     return eamsd_series
 
+
 def calculate_ergodicity_parameters(df):
+    """
+    Optimized function to calculate ergodicity parameters for each trajectory based on pre-calculated
+    Time-Averaged Mean Squared Displacement (TAMSD) and Ensemble-Averaged
+    Mean Squared Displacement (EAMSD).
+
+    The function adds the following columns directly to the input DataFrame:
+    - 'EAMSD_All': Ensemble-Averaged MSD across all trajectories for each Lag_T.
+    - 'Ergodicity_All': TAMSD / EAMSD_All for each trajectory.
+    - 'EAMSD_Group': Ensemble-Averaged MSD for the trajectory's specific group (if 'traj_label' exists).
+    - 'Ergodicity_Group': TAMSD / EAMSD_Group for each trajectory within its group.
+
+    Parameters:
+        df (pd.DataFrame): The input DataFrame containing single particle tracking data.
+                           Must include 'UID', 'Lag_T', and 'MSD' columns.
+                           Optionally includes 'traj_label' for group-specific analysis.
+
+    Returns:
+        pd.DataFrame: The original DataFrame with added ergodicity-related columns.
+
+    Raises:
+        ValueError: If 'MSD' or 'Lag_T' columns are missing.
+    """
+    if 'MSD' not in df.columns or 'Lag_T' not in df.columns:
+        raise ValueError("DataFrame must contain 'MSD' and 'Lag_T' columns for ergodicity calculation.")
+
+    # Calculate global EAMSD once for the entire DataFrame
+    global_eamsd_series = _calculate_ensemble_averaged_msd_average(df)
+    global_eamsd_dict = global_eamsd_series.to_dict()
+
+    # --- Vectorized calculation for EAMSD_All and Ergodicity_All ---
+    # Map 'Lag_T' values to their corresponding global EAMSD values
+    df['EAMSD_All'] = df['Lag_T'].map(global_eamsd_dict)
+    
+    # Calculate Ergodicity_All
+    # Ensure division by zero/NaN is handled gracefully; it will result in NaN where EAMSD_All is 0 or NaN
+    df['Ergodicity_All'] = df['MSD'] / df['EAMSD_All']
+
+    # --- Conditional calculation for Group EAMSD and Ergodicity_Group ---
+    if 'traj_label' in df.columns:
+        # Pre-calculate EAMSD for each 'traj_label' group
+        group_eamsd_data = []
+        for label, group_df in df.groupby('traj_label'):
+            group_eamsd_series = _calculate_ensemble_averaged_msd_average(group_df)
+            for lag_t, eamsd_val in group_eamsd_series.items():
+                group_eamsd_data.append({'traj_label': label, 'Lag_T': lag_t, 'EAMSD_Group_Value': eamsd_val})
+        
+        if group_eamsd_data:
+            group_eamsd_df_lookup = pd.DataFrame(group_eamsd_data)
+            
+            # Merge this lookup DataFrame back to the original df
+            df = df.merge(
+                group_eamsd_df_lookup,
+                on=['traj_label', 'Lag_T'],
+                how='left',
+                suffixes=('', '_Group_Merge') # Suffix for the new EAMSD column to avoid collision if any
+            )
+            df.rename(columns={'EAMSD_Group_Value': 'EAMSD_Group'}, inplace=True)
+            
+            # Calculate Ergodicity_Group
+            df['Ergodicity_Group'] = df['MSD'] / df['EAMSD_Group']
+        else:
+            # If no group data (e.g., all groups were empty), initialize with NaN
+            df['EAMSD_Group'] = np.nan
+            df['Ergodicity_Group'] = np.nan
+    else:
+        # If 'traj_label' doesn't exist, ensure these columns are present but NaN
+        df['EAMSD_Group'] = np.nan
+        df['Ergodicity_Group'] = np.nan
+
+    return df
+
+
+def calculate_ergodicity_parameters_old(df):
     """
     Calculates ergodicity parameters for each trajectory based on pre-calculated
     Time-Averaged Mean Squared Displacement (TAMSD) and Ensemble-Averaged
