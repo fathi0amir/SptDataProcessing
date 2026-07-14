@@ -104,6 +104,57 @@ def calculate_msd_old(df) -> pd.DataFrame:
     
     return df
 
+
+def remove_msd_offset(df_trajectory: pd.DataFrame, replace: bool = True) -> pd.DataFrame:
+    """
+    Fits the first few points of a trajectory's MSD vs. Lag_T data to a line
+    to determine a y-intercept (offset), and then subtracts this offset from
+    the entire MSD column, storing the result in a new 'MSD_NoOff' column.
+    
+    This can be useful to correct for localization error bias in MSD measurements.
+
+    Args:
+        df_trajectory (pd.DataFrame): DataFrame containing a single trajectory
+                                      with 'MSD' and 'Lag_T' columns.
+
+    Returns:
+        pd.DataFrame: The input DataFrame with an additional 'MSD_NoOff' column.
+                      If the trajectory has fewer than the required points for fitting
+                      (currently 4), 'MSD_NoOff' will be NaN for that trajectory.
+    """
+    num_points_for_fit = 4 # As requested by the user
+
+    if len(df_trajectory) < num_points_for_fit:
+        df_trajectory['MSD_NoOff'] = np.nan
+        return df_trajectory
+
+    # Get the first `num_points_for_fit` data points
+    x_fit = df_trajectory['Lag_T'].iloc[:num_points_for_fit].values
+    y_fit = df_trajectory['MSD'].iloc[:num_points_for_fit].values
+
+    # Fit a straight line (degree 1 polynomial) to these points
+    # polyfit returns coefficients [slope, intercept]
+    try:
+        coefficients = np.polyfit(x_fit, y_fit, 1)
+        offset = coefficients[1] # The y-intercept is the second coefficient
+    except Exception:
+        # Handle cases where fitting might fail (e.g., all y_fit are NaN or non-finite)
+        offset = np.nan
+
+    # to make sure the offset correction brings MSD to negative values, 
+    # we will set the offset to the minimum value of the MSD if it is less than that
+    if offset < y_fit.min():
+        offset = y_fit.min()
+
+    # Subtract the offset from the entire MSD column to create 'MSD_NoOff'
+    if replace:
+        df_trajectory['MSD'] = df_trajectory['MSD'] - offset
+    else:
+        df_trajectory['MSD_NoOff'] = df_trajectory['MSD'] - offset
+    
+    return df_trajectory
+
+
 # MARK: Diffusion Coefficient Calculation
 def normal_diffusion_msd(t, d):
     """
