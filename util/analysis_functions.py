@@ -104,12 +104,43 @@ def calculate_msd_old(df) -> pd.DataFrame:
     
     return df
 
+def remove_msd_offset_with_lr(
+        df: pd.DataFrame, 
+        localization_precision: float = const.LOCALIZATION_PRECISION_UM, 
+        replace: bool = True) -> pd.DataFrame:
+    """
+    Removes the offset from the MSD data using linear regression.
+    The offset is calculated as the y-intercept of the linear regression line fitted to the first few points of the MSD vs. Lag_T data.
+    This offset is then subtracted from the entire MSD column, and the result is stored in a new 'MSD_NoOff' column.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing a single trajectory with 'MSD' and 'Lag_T' columns.
+        localization_precision (float): The localization precision in micrometers. 
+                                         This value is used to determine the number of points to use for fitting.
+        replace (bool): If True, the original 'MSD' column will be replaced with the offset-corrected values.
+    Returns:
+        pd.DataFrame: The input DataFrame with an additional 'MSD_NoOff' column.
+                      If the trajectory has fewer than the required points for fitting (currently 4), 'MSD_NoOff' will be NaN for that trajectory.
+    """
+
+    sig = localization_precision
+
+    if replace:
+        df['MSD'] = df['MSD'] - 2*sig**2
+    else:
+        df['MSD_NoOff'] = df['MSD'] - 2*sig**2
+
+    return df
+
 
 def remove_msd_offset(df_trajectory: pd.DataFrame, replace: bool = True) -> pd.DataFrame:
     """
     Fits the first few points of a trajectory's MSD vs. Lag_T data to a line
     to determine a y-intercept (offset), and then subtracts this offset from
     the entire MSD column, storing the result in a new 'MSD_NoOff' column.
+
+    **CAUSION**: finding offset from fitting is not reliable. 
+    Refer to Michalet 2010 (Mean square displacement analysis of single-particle trajectories with localization error, Phys. Rev. E 82, 041914)
     
     This can be useful to correct for localization error bias in MSD measurements.
 

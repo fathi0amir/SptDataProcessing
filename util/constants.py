@@ -7,12 +7,14 @@ MSD_LENGTH_DIVISOR = 0.5  # The maximum lag time is set to 60% of the total time
 # Thresholds for alpha values
 PIXEL_IN_NM = 65  # Conversion factor from pixels to nanometers
 
+
 # Nanometer to micrometer conversion factor if needed
 # If the trackmate data is in nanometers put this value to 0.001
 # otherwise, if the data is in micrometers, set it to 1
 NANOMETER_TO_MICROMETER = 0.001  # Conversion factor from nanometers to micrometers
 
-LOCALIZATION_PRECISION_NM = 50 # Localization precision in nanometers, used for filtering stationary tracks.
+LOCALIZATION_PRECISION_NM = 20 # Localization precision in nanometers, used for filtering stationary tracks.
+LOCALIZATION_PRECISION_UM = LOCALIZATION_PRECISION_NM * NANOMETER_TO_MICROMETER  # Localization precision in micrometers
 MIN_TRAJECTORY_LENGTH = 40 # Minimum number of frames for a trajectory to be considered valid
 
 ALPHA_THRESHOLDS = {
