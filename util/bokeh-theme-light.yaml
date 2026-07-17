@@ -55,7 +55,7 @@ attrs:
     text_color:      "#111111"
     text_font:       "Noto Sans"
     text_font_size:  "16pt"
-    text_font_style: "bold"
+    text_font_style: "normal"
     text_alpha:      1.0
     align:           "left"
     offset:          0
