@@ -19,7 +19,7 @@ MIN_TRAJECTORY_LENGTH = 40 # Minimum number of frames for a trajectory to be con
 
 ALPHA_THRESHOLDS = {
     # between 0.8 and 1.2 is considered normal diffusion
-    'ignore': 0.3,  # Ignore tracks with alpha <= 0.3
+    'ignore': 0.2,  # Ignore tracks with alpha <= 0.3
     'sub': 0.8,     # Low alpha threshold
     'sup': 1.2,     # High alpha threshold
 }
