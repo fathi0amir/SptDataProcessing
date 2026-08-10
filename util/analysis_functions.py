@@ -1,12 +1,12 @@
 """
 All the analysis functions are defined here.
 """
-import pandas as pd
 import numpy as np
-import param
+import pandas as pd
+import param  # noqa: F401
+from lmfit import Model, Parameters
 from scipy.optimize import curve_fit
 from scipy.spatial.distance import pdist
-from lmfit import Model, Parameters
 
 import util.constants as const
 
@@ -1601,3 +1601,411 @@ def calculate_gyration_tensor_parameters(df_trajectory: pd.DataFrame) -> pd.Data
     df_trajectory['Anisotropy'] = anisotropy
 
     return df_trajectory
+
+def single_mol_fit_single_step(frames, intensities, min_edge=5):
+    """
+    Fits a single-step photobleaching step-detection model to an intensity
+    trace.
+
+    Uses an O(N) cumulative sum algorithm to evaluate all potential step
+    partition indices in O(1) time per candidate point. Finds the partition
+    index that minimizes the total Residual Sum of Squares (RSS) of a 2-segment
+    step model.
+
+    Parameters:
+        frames (np.ndarray): 1D array of frame indices corresponding to the trace points.
+        intensities (np.ndarray): 1D array of intensity values (e.g., 'mass' or 'signal').
+        min_edge (int, optional): Minimum number of consecutive frames required in both 
+                                  the 'before' and 'after' plateaus. Defaults to 5.
+
+    Returns:
+        dict or None: Returns `None` if the trajectory length is shorter than `2 * min_edge`.
+        Otherwise, returns a dictionary with the following fields:
+            - 'step_idx' (int): Index in the input array where the step transition occurs.
+            - 'bleach_frame' (int/float): Frame value corresponding to the step location.
+            - 'mean_before' (float): Mean intensity of the trace before the step.
+            - 'mean_after' (float): Mean intensity of the trace after the step.
+            - 'step_size' (float): Magnitude of intensity drop (`mean_before - mean_after`).
+            - 'noise_before' (float): Standard deviation of intensity before the step.
+            - 'noise_after' (float): Standard deviation of intensity after the step.
+            - 'rss_step' (float): Total Residual Sum of Squares for the 2-segment step model.
+            - 'rss_flat' (float): Total Residual Sum of Squares for a 0-step (flat mean) model.
+    """
+    N = len(intensities)
+    if N < 2 * min_edge:
+        return None
+    
+    cum_sum = np.cumsum(intensities)
+    cum_sum_sq = np.cumsum(intensities**2)
+    total_sum = cum_sum[-1]
+    total_sum_sq = cum_sum_sq[-1]
+    
+    k_arr = np.arange(min_edge, N - min_edge + 1)
+    sum1 = cum_sum[min_edge - 1 : N - min_edge]
+    sum2 = total_sum - sum1
+    
+    mean1 = sum1 / k_arr
+    mean2 = sum2 / (N - k_arr)
+    
+    rss1 = cum_sum_sq[min_edge - 1 : N - min_edge] - (sum1**2) / k_arr
+    rss2 = (total_sum_sq - cum_sum_sq[min_edge - 1 : N - min_edge]) - (sum2**2) / (N - k_arr)
+    total_rss = rss1 + rss2
+    
+    best_idx = np.argmin(total_rss)
+    best_k = k_arr[best_idx]
+    mean_before = mean1[best_idx]
+    mean_after = mean2[best_idx]
+    
+    y_before = intensities[:best_k]
+    y_after = intensities[best_k:]
+    
+    return {
+        'step_idx': best_k,
+        'bleach_frame': frames[best_k],
+        'mean_before': mean_before,
+        'mean_after': mean_after,
+        'step_size': mean_before - mean_after,
+        'noise_before': np.std(y_before) if len(y_before) > 1 else 1e-6,
+        'noise_after': np.std(y_after) if len(y_after) > 1 else 1e-6,
+        'rss_step': total_rss[best_idx],
+        'rss_flat': total_sum_sq - (total_sum**2) / N
+    }
+
+
+def single_mol_analyze_single_step_photobleaching(
+    df,
+    intensity_col='mass',
+    min_track_length=15,
+    min_edge_frames=5,
+    min_snr=3.0,
+    max_final_ratio=0.4
+):
+    """
+    Runs single-step photobleaching analysis on all trajectories and fits statistical models.
+
+    Iterates over all trajectories in the dataset, applying single-step partition fitting
+    `single_mol_fit_single_step` and enforcing single-molecule photobleaching selection rules:
+    1. Positive intensity drop (`step_size > 0`).
+    2. High Signal-to-Noise Ratio (SNR ≥ `min_snr`).
+    3. Bleaching down to background level (`mean_after` < `mean_before` × `max_final_ratio`).
+
+    Subsequent statistical model fitting is performed on qualifying single-step events:
+    - **Step Sizes (ΔI)**: Fitted with a Gaussian function to extract quantum unit loss.
+    - **Bleaching Lifetime (τ)**: Fitted with a single-exponential decay function.
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing trajectory data. Must include columns
+                           'UID', 'Frame', and the specified `intensity_col`.
+        intensity_col (str, optional): Intensity metric column name (e.g., 'mass', 'raw_mass',
+                                       or 'signal'). Defaults to 'mass'.
+        min_track_length (int, optional): Minimum number of frames required to analyze a trajectory.
+                                          Defaults to 15.
+        min_edge_frames (int, optional): Minimum edge frames required before and after the step.
+                                         Defaults to 5.
+        min_snr (float, optional): Minimum Signal-to-Noise Ratio (`step_size / noise_after`).
+                                  Defaults to 3.0.
+        max_final_ratio (float, optional): Maximum allowable ratio of mean intensity after the step
+                                           to mean intensity before the step. Defaults to 0.4.
+
+    Returns:
+        tuple[pd.DataFrame, dict]:
+            - **bleach_df** (pd.DataFrame): DataFrame of qualifying photobleaching trajectories
+              containing step parameters ('UID', 'step_idx', 'bleach_frame', 'mean_before',
+              'mean_after', 'step_size', 'noise_before', 'noise_after', 'snr', 'track_length',
+              'bleach_time').
+            - **fit_summary** (dict): Dictionary containing statistical fit outputs:
+                - `'gauss'`: Tuple of `(counts, bin_edges, popt_gauss)` for step size distribution.
+                - `'exp'`: Tuple of `(counts_t, bin_edges_t, popt_exp)` for survival time decay distribution.
+
+    """
+    bleach_results = []
+    all_tracks = df.groupby('UID')
+    
+    for uid, track_df in all_tracks:
+        track_df = track_df.sort_values('Frame').dropna(subset=[intensity_col])
+        if len(track_df) < min_track_length:
+            continue
+        
+        frames = track_df['Frame'].values
+        intensities = track_df[intensity_col].values
+        
+        fit = single_mol_fit_single_step(frames, intensities, min_edge=min_edge_frames)
+        if fit is None:
+            continue
+            
+        snr = fit['step_size'] / fit['noise_after']
+        is_bleached = (fit['mean_after'] < fit['mean_before'] * max_final_ratio)
+        
+        if fit['step_size'] > 0 and snr >= min_snr and is_bleached:
+            fit['UID'] = uid
+            fit['snr'] = snr
+            fit['track_length'] = len(track_df)
+            fit['bleach_time'] = fit['step_idx'] * const.DT
+            bleach_results.append(fit)
+
+    bleach_df = pd.DataFrame(bleach_results)
+    fit_summary = {'gauss': None, 'exp': None}
+    
+    if bleach_df.empty:
+        print("Warning: No single-step photobleaching tracks found.")
+        return bleach_df, fit_summary
+
+    # Summary prints
+    n_analyzed = sum(1 for _, t in all_tracks if len(t) >= min_track_length)
+    print("=" * 60)
+    print("SINGLE-STEP PHOTOBLEACHING ANALYSIS SUMMARY")
+    print("=" * 60)
+    print(f"Analyzed Trajectories (>= {min_track_length} frames): {n_analyzed}")
+    print(f"Single-step Bleach Events:           {len(bleach_df)} ({len(bleach_df)/n_analyzed*100:.1f}%)")
+    print(f"Average Step Size (ΔI):              {bleach_df['step_size'].mean():.2f} ± {bleach_df['step_size'].std():.2f}")
+    print(f"Average SNR:                         {bleach_df['snr'].mean():.2f}")
+    print("=" * 60)
+
+    # Gaussian Fit on Step Sizes
+    step_sizes = bleach_df['step_size'].values
+    counts, bin_edges = np.histogram(step_sizes, bins='auto')
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    try:
+        popt_gauss, _ = curve_fit(
+            lambda x, a, x0, s: a * np.exp(-(x - x0)**2 / (2 * s**2)),
+            bin_centers, counts,
+            p0=[max(counts), np.median(step_sizes), np.std(step_sizes)]
+        )
+        fit_summary['gauss'] = (counts, bin_edges, popt_gauss)
+    except (RuntimeError, ValueError) as e:
+        print(f"Gaussian fit failed: {e}")
+        fit_summary['gauss'] = (counts, bin_edges, None)
+
+    # Exponential Decay Fit on Bleaching Times
+    bleach_times = bleach_df['bleach_time'].values
+    counts_t, bin_edges_t = np.histogram(bleach_times, bins='auto')
+    bin_centers_t = (bin_edges_t[:-1] + bin_edges_t[1:]) / 2
+    try:
+        popt_exp, _ = curve_fit(
+            lambda t, a, tau: a * np.exp(-t / tau),
+            bin_centers_t, counts_t,
+            p0=[max(counts_t), np.mean(bleach_times)]
+        )
+        fit_summary['exp'] = (counts_t, bin_edges_t, popt_exp)
+    except (RuntimeError, ValueError) as e:
+        print(f"Exponential decay fit failed: {e}")
+        fit_summary['exp'] = (counts_t, bin_edges_t, None)
+
+    return bleach_df, fit_summary
+
+def single_mol_fit_multi_step(frames, intensities, min_edge=5, max_steps=3, bic_threshold=10):
+    """
+    Fits a multi-step photobleaching model to an intensity trace using
+    recursive CUSUM partition search with BIC model selection.
+
+    Starting from a flat (0-step) model, the algorithm iteratively searches
+    for the best additional step within each existing segment by calling
+    `single_mol_fit_single_step`. At each iteration the candidate step that
+    yields the largest RSS reduction is accepted only if the Bayesian
+    Information Criterion (BIC) improvement exceeds `bic_threshold`:
+
+        BIC = N · ln(RSS / N) + p · ln(N)
+
+    where N is the trace length and p is the number of free parameters
+    (p = 2k + 1 for k steps: k + 1 plateau means plus k step locations).
+    Iteration stops when no candidate improves BIC by more than the
+    threshold or `max_steps` is reached.
+
+    Parameters:
+        frames (np.ndarray): 1D array of frame indices for the trace.
+        intensities (np.ndarray): 1D array of intensity values.
+        min_edge (int, optional): Minimum frames required in each plateau
+                                  segment. Defaults to 5.
+        max_steps (int, optional): Maximum number of steps to fit.
+                                   Defaults to 3.
+        bic_threshold (float, optional): Minimum ΔBIC required to accept an
+                                         additional step. Defaults to 10.
+
+    Returns:
+        dict or None: Returns `None` if the trace is shorter than
+        `2 * min_edge`. Otherwise returns a dictionary with:
+            - 'num_steps' (int): Number of accepted steps (0 if flat model wins).
+            - 'step_locations_idx' (list[int]): Sorted array indices of step
+              transitions.
+            - 'step_frames' (list[int/float]): Frame values at each step.
+            - 'plateau_values' (list[float]): Mean intensity of each plateau
+              segment (length = num_steps + 1).
+            - 'step_sizes' (list[float]): Intensity drop at each step
+              (plateau_i − plateau_{i+1}, positive for downward steps).
+    """
+    N = len(intensities)
+    if N < 2 * min_edge:
+        return None
+    
+    best_rss = np.sum((intensities - np.mean(intensities))**2)
+    best_p = 1
+    best_bic = N * np.log(best_rss / N) + best_p * np.log(N)
+    
+    step_locations = []
+    
+    for step_num in range(1, max_steps + 1):
+        candidate_fits = []
+        boundaries = [0] + sorted(step_locations) + [N]
+        
+        for i in range(len(boundaries) - 1):
+            start, end = boundaries[i], boundaries[i+1]
+            seg_frames = frames[start:end]
+            seg_intensities = intensities[start:end]
+            
+            fit = single_mol_fit_single_step(seg_frames, seg_intensities, min_edge=min_edge)
+            if fit is not None:
+                other_segments_rss = sum(
+                    np.sum((intensities[boundaries[j]:boundaries[j+1]] - np.mean(intensities[boundaries[j]:boundaries[j+1]]))**2)
+                    for j in range(len(boundaries) - 1) if j != i
+                )
+                total_candidate_rss = other_segments_rss + fit['rss_step']
+                candidate_fits.append((total_candidate_rss, start + fit['step_idx']))
+        
+        if not candidate_fits:
+            break
+            
+        candidate_fits.sort()
+        best_candidate_rss, best_candidate_loc = candidate_fits[0]
+        
+        candidate_p = best_p + 2
+        candidate_bic = N * np.log(best_candidate_rss / N) + candidate_p * np.log(N)
+        
+        if (best_bic - candidate_bic) > bic_threshold:
+            step_locations.append(best_candidate_loc)
+            best_rss = best_candidate_rss
+            best_bic = candidate_bic
+            best_p = candidate_p
+        else:
+            break
+            
+    boundaries_sorted = sorted(step_locations)
+    boundaries = [0] + boundaries_sorted + [N]
+    final_plateaus = [np.mean(intensities[boundaries[i]:boundaries[i+1]]) for i in range(len(boundaries)-1)]
+    
+    return {
+        'num_steps': len(step_locations),
+        'step_locations_idx': boundaries_sorted,
+        'step_frames': [frames[loc] for loc in boundaries_sorted],
+        'plateau_values': final_plateaus,
+        'step_sizes': [-np.diff(final_plateaus)[i] for i in range(len(final_plateaus)-1)]
+    }
+
+
+def single_mol_analyze_multi_step_photobleaching(
+    df,
+    intensity_col='mass',
+    min_track_length=15,
+    min_edge_frames=5,
+    max_steps=5,
+    bic_threshold=10.0,
+    max_final_ratio=0.4
+):
+    """
+    Runs recursive multi-step photobleaching analysis on all trajectories
+    and evaluates stoichiometry.
+
+    Iterates over every trajectory in the dataset, applying
+    `single_mol_fit_multi_step` (recursive CUSUM + BIC model selection)
+    and enforcing the following quality filters:
+    1. All detected steps are downward (every ΔI > 0).
+    2. Final plateau is near background
+       (Ī_last / Ī_first < `max_final_ratio`).
+
+    Qualifying trajectories are classified by step count into
+    stoichiometry classes (1-step → monomer, 2-step → dimer,
+    ≥ 3-step → trimer / aggregate) and a summary is printed.
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing trajectory data.
+                           Must include columns 'UID', 'Frame', and the
+                           specified `intensity_col`.
+        intensity_col (str, optional): Intensity metric column name
+                                       (e.g., 'mass', 'raw_mass', or
+                                       'signal'). Defaults to 'mass'.
+        min_track_length (int, optional): Minimum number of frames
+                                          required to analyze a trajectory.
+                                          Defaults to 15.
+        min_edge_frames (int, optional): Minimum frames required in each
+                                         plateau segment passed to the
+                                         step fitter. Defaults to 5.
+        max_steps (int, optional): Maximum number of photobleaching steps
+                                   to search for per trajectory.
+                                   Defaults to 5.
+        bic_threshold (float, optional): Minimum ΔBIC required to accept
+                                         an additional step. Defaults to
+                                         10.0.
+        max_final_ratio (float, optional): Maximum allowable ratio
+                                           Ī_last / Ī_first for a
+                                           trajectory to qualify as fully
+                                           bleached. Defaults to 0.4.
+
+    Returns:
+        pd.DataFrame: DataFrame of qualifying multi-step photobleaching
+        trajectories with columns:
+            - 'UID': Trajectory identifier.
+            - 'num_steps' (int): Number of detected steps.
+            - 'step_locations_idx' (list[int]): Array indices of step
+              transitions.
+            - 'step_frames' (list[int/float]): Frame values at each step.
+            - 'plateau_values' (list[float]): Mean intensity of each
+              plateau segment.
+            - 'step_sizes' (list[float]): Intensity drop at each step.
+            - 'track_length' (int): Number of frames in the trajectory.
+            - 'final_ratio' (float): Ī_last / Ī_first intensity ratio.
+
+        Returns an empty DataFrame if no trajectories pass the filters.
+    """
+    step_results = []
+    all_tracks = df.groupby('UID')
+
+    for uid, track_df in all_tracks:
+        track_df = track_df.sort_values('Frame').dropna(subset=[intensity_col])
+        if len(track_df) < min_track_length:
+            continue
+        
+        frames = track_df['Frame'].values
+        intensities = track_df[intensity_col].values
+        
+        fit = single_mol_fit_multi_step(
+            frames, intensities, 
+            min_edge=min_edge_frames, 
+            max_steps=max_steps, 
+            bic_threshold=bic_threshold
+        )
+        if fit is None or fit['num_steps'] == 0:
+            continue
+            
+        all_downward = all(size > 0 for size in fit['step_sizes'])
+        final_ratio = fit['plateau_values'][-1] / fit['plateau_values'][0] if fit['plateau_values'][0] != 0 else np.inf
+        is_bleached = final_ratio < max_final_ratio
+        
+        if all_downward and is_bleached:
+            fit['UID'] = uid
+            fit['track_length'] = len(track_df)
+            fit['final_ratio'] = final_ratio
+            step_results.append(fit)
+
+    results_df = pd.DataFrame(step_results)
+
+    if results_df.empty:
+        print("Warning: No stepwise bleaching trajectories qualified under specified rules.")
+        return results_df
+
+    n_analyzed_tracks = sum(1 for _, t in all_tracks if len(t) >= min_track_length)
+    n_stepwise = len(results_df)
+    
+    print("\n" + "="*60)
+    print("RECURSIVE MULTI-STEP PHOTOBLEACHING ANALYSIS SUMMARY")
+    print("="*60)
+    print(f"Total trajectories in dataset:           {len(all_tracks)}")
+    print(f"Trajectories >= {min_track_length} frames analyzed:      {n_analyzed_tracks}")
+    print(f"Qualifying stepwise bleaching tracks:    {n_stepwise} ({100 * n_stepwise / n_analyzed_tracks:.1f}% of analyzed)")
+    
+    step_counts = results_df['num_steps'].value_counts().sort_index()
+    for steps, count in step_counts.items():
+        pct = 100 * count / n_stepwise
+        label = "Monomer" if steps == 1 else "Dimer" if steps == 2 else "Trimer/Aggregate"
+        print(f"  {steps}-step class ({label}): {count} tracks ({pct:.1f}%)")
+    print("="*60 + "\n")
+
+    return results_df
