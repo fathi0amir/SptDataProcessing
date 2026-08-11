@@ -602,6 +602,7 @@ def set_legend_top_horizontal(plot, element):
         p.legend[0].title=''
 
 
+
 def single_mol_single_step_photobleaching_dashboard(df, bleach_df, fit_summary, intensity_col='mass'):
     """
     Generates a 3x2 HoloViews dashboard for single-step photobleaching traces and fits.
@@ -623,13 +624,13 @@ def single_mol_single_step_photobleaching_dashboard(df, bleach_df, fit_summary, 
         t_time = (track_data['Frame'].values - track_data['Frame'].values[0]) * const.DT
         t_intensities = track_data[intensity_col].values
 
-        raw_curve = hv.Curve((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(color='#5A96DC', alpha=0.4)
+        raw_curve = hv.Curve((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(line_color='#5A96DC', line_alpha=0.4)
         raw_scatter = hv.Scatter((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(color='#5A96DC', size=4.5, alpha=0.85)
 
         step_time = t_time[row['step_idx']]
         step_t = [t_time[0], step_time, step_time, t_time[-1]]
         step_y = [row['mean_before'], row['mean_before'], row['mean_after'], row['mean_after']]
-        fit_curve = hv.Curve((step_t, step_y), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(color='#E74C3C', line_width=2.5)
+        fit_curve = hv.Curve((step_t, step_y), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(line_color='#E74C3C', line_width=2.5)
 
         label_text = f"UID: {row['UID']}\nΔI = {row['step_size']:.0f}\nSNR = {row['snr']:.1f}"
         text_ann = hv.Text(t_time[-1] * 0.5, max(t_intensities) * 0.85, label_text, fontsize=10)
@@ -645,7 +646,7 @@ def single_mol_single_step_photobleaching_dashboard(df, bleach_df, fit_summary, 
     if popt_gauss is not None:
         fit_x = np.linspace(min(bleach_df['step_size']), max(bleach_df['step_size']), 150)
         fit_y = popt_gauss[0] * np.exp(-(fit_x - popt_gauss[1])**2 / (2 * popt_gauss[2]**2))
-        step_plot = step_hist * hv.Curve((fit_x, fit_y), label=f'Gaussian (μ={popt_gauss[1]:.1f}, σ={popt_gauss[2]:.1f})').opts(color='#2ECC71', line_width=3.0)
+        step_plot = step_hist * hv.Curve((fit_x, fit_y), label=f'Gaussian (μ={popt_gauss[1]:.1f}, σ={popt_gauss[2]:.1f})').opts(line_color='#2ECC71', line_width=3.0)
     else:
         step_plot = step_hist
     step_plot = step_plot.opts(title="Bleaching Step Size", width=380, height=280, legend_position='top_right').opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes, set_legend_top_horizontal])
@@ -656,7 +657,7 @@ def single_mol_single_step_photobleaching_dashboard(df, bleach_df, fit_summary, 
     if popt_exp is not None:
         fit_t = np.linspace(0, max(bleach_df['bleach_time']), 150)
         fit_n = popt_exp[0] * np.exp(-fit_t / popt_exp[1])
-        time_plot = time_hist * hv.Curve((fit_t, fit_n), label=f'Exp. Decay (τ={popt_exp[1]:.2f} s)').opts(color='#9B59B6', line_width=3.0)
+        time_plot = time_hist * hv.Curve((fit_t, fit_n), label=f'Exp. Decay (τ={popt_exp[1]:.2f} s)').opts(line_color='#9B59B6', line_width=3.0)
     else:
         time_plot = time_hist
     time_plot = time_plot.opts(title="Photobleaching Lifetime Decay", width=380, height=280, legend_position='top_right').opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes, set_legend_top_horizontal])
@@ -761,3 +762,116 @@ def single_mol_multi_step_photobleaching_dashboard(df, results_df, intensity_col
         title="Oligomerization Stoichiometry & Multi-Step Bleaching Dashboard",
         shared_axes=False, axiswise=True, framewise=True
     )
+
+
+def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intensity_col='mass'):
+    """
+    Generates a HoloViews Tabs (hv.Tabs) dashboard for multi-step photobleaching traces and stoichiometry.
+    """
+    if results_df.empty:
+        return None
+
+    hv.extension("bokeh")
+    hv.renderer("bokeh").theme = Theme(filename="util/bokeh-theme-light.yaml")
+    all_tracks = df.groupby('UID')
+
+    sorted_df = results_df.sort_values(by=['num_steps', 'final_ratio'], ascending=[False, True])
+    rep_uids = []
+    
+    for steps in [3, 2, 2, 1]:
+        sub = sorted_df[sorted_df['num_steps'] == steps]
+        if not sub.empty:
+            candidate = sub.iloc[0]['UID']
+            if candidate not in rep_uids:
+                rep_uids.append(candidate)
+                
+    for _, row in sorted_df.iterrows():
+        if len(rep_uids) >= 4:
+            break
+        if row['UID'] not in rep_uids:
+            rep_uids.append(row['UID'])
+            
+    trace_plots = []
+    
+    for idx, uid in enumerate(rep_uids):
+        fit_info = results_df[results_df['UID'] == uid].iloc[0]
+        track_data = all_tracks.get_group(uid).sort_values('Frame')
+        t_frames = track_data['Frame'].values
+        t_time = (t_frames - t_frames[0]) * const.DT
+        t_intensities = track_data[intensity_col].values
+        
+        raw_curve = hv.Curve((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
+            line_color='#5A96DC', line_width=1.0, line_alpha=0.4
+        )
+        raw_scatter = hv.Scatter((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
+            color='#5A96DC', size=4.5, alpha=0.85
+        )
+        
+        locs = fit_info['step_locations_idx']
+        edges_idx = [0] + locs + [len(track_data)]
+        step_t, step_y = [], []
+        for i in range(len(edges_idx) - 1):
+            s_idx, e_idx = edges_idx[i], edges_idx[i+1]
+            step_t.append(t_time[s_idx])
+            step_y.append(fit_info['plateau_values'][i])
+            step_t.append(t_time[min(e_idx - 1, len(t_time) - 1)])
+            step_y.append(fit_info['plateau_values'][i])
+            
+        fit_curve = hv.Curve((step_t, step_y), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
+            line_color='#E74C3C', line_width=2.5
+        )
+        
+        text_x = t_time[-1] * 0.5
+        text_y = max(t_intensities) * 0.85
+        step_sizes_formatted = ", ".join([f"{int(s)}" for s in fit_info['step_sizes']])
+        label_text = f"UID: {uid} \nSteps: {fit_info['num_steps']}\nΔI: [{step_sizes_formatted}]"
+        
+        text_annotation = hv.Text(text_x, text_y, label_text, fontsize=10).opts(text_color='#333333')
+        
+        title_classes = ["Monomer", "Dimer", "Trimer/Aggregate"]
+        class_label = title_classes[min(fit_info['num_steps'] - 1, 2)]
+        
+        combined_track = (raw_curve * raw_scatter * fit_curve * text_annotation).opts(
+            title=f"{class_label} Trace {idx+1}", show_legend=False
+        ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+        
+        trace_plots.append((f"Trace {idx+1}", combined_track))
+        
+    counts = results_df['num_steps'].value_counts().sort_index()
+    proportions = (counts / counts.sum() * 100).round(1)
+    
+    proportion_df = pd.DataFrame({
+        'Steps': [f"{s} Step" + ("s" if s > 1 else "") for s in counts.index],
+        'Percent': proportions.values
+    })
+    
+    proportion_bars = hv.Bars(proportion_df, kdims='Steps', vdims='Percent').opts(
+        title='Bleach Type Distribution', xlabel='Bleaching Profile', ylabel='Proportion of Tracks (%)', color='#4E79A7', width=750, height=450, show_legend=False
+    ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+    
+    all_individual_steps = []
+    for sizes in results_df['step_sizes']:
+        all_individual_steps.extend(sizes)
+        
+    step_sizes_arr = np.array(all_individual_steps)
+    counts_sz, bin_edges_sz = np.histogram(step_sizes_arr, bins='auto')
+    
+    size_hist = hv.Histogram((counts_sz, bin_edges_sz), kdims=['Bleaching Step Size (a.u.)'], vdims=['Frequency']).opts(
+        title='Step Size Distribution', color='#2ECC71', alpha=0.55, width=750, height=450, show_legend=False
+    ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+
+    tab_dict = {
+        f"Trace {i+1}": plot for i, (_, plot) in enumerate(trace_plots)
+    } | {
+        "Stoichiometry": proportion_bars,
+        "Step Size": size_hist,
+    }
+
+    tabs = hv.Layout(tab_dict).opts(
+        tabs=True,
+        shared_axes=False,
+        axiswise=True,
+        framewise=True
+    )
+    
+    return tabs
