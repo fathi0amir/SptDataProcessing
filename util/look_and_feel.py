@@ -799,13 +799,13 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         t_frames = track_data['Frame'].values
         t_time = (t_frames - t_frames[0]) * const.DT
         t_intensities = track_data[intensity_col].values
-        
-        raw_curve = hv.Curve((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
-            line_color='#5A96DC', line_width=1.0, line_alpha=0.4
-        )
-        raw_scatter = hv.Scatter((t_time, t_intensities), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
-            color='#5A96DC', size=4.5, alpha=0.85
-        )
+
+        raw_curve = hv.Curve(
+            (t_time, t_intensities), kdims=["Time (s)"], vdims=["Intensity (a.u.)"]
+        ).opts(line_color="#5A96DC", line_width=1.0, line_alpha=0.4, active_tools=[])
+        raw_scatter = hv.Scatter(
+            (t_time, t_intensities), kdims=["Time (s)"], vdims=["Intensity (a.u.)"]
+        ).opts(color="#5A96DC", size=4.5, alpha=0.85, active_tools=[])
         
         locs = fit_info['step_locations_idx']
         edges_idx = [0] + locs + [len(track_data)]
@@ -816,10 +816,10 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
             step_y.append(fit_info['plateau_values'][i])
             step_t.append(t_time[min(e_idx - 1, len(t_time) - 1)])
             step_y.append(fit_info['plateau_values'][i])
-            
-        fit_curve = hv.Curve((step_t, step_y), kdims=['Time (s)'], vdims=['Intensity (a.u.)']).opts(
-            line_color='#E74C3C', line_width=2.5
-        )
+
+        fit_curve = hv.Curve(
+            (step_t, step_y), kdims=["Time (s)"], vdims=["Intensity (a.u.)"]
+        ).opts(line_color="#E74C3C", line_width=2.5, active_tools=[])
         
         text_x = t_time[-1] * 0.5
         text_y = max(t_intensities) * 0.85
@@ -844,10 +844,22 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         'Steps': [f"{s} Step" + ("s" if s > 1 else "") for s in counts.index],
         'Percent': proportions.values
     })
-    
-    proportion_bars = hv.Bars(proportion_df, kdims='Steps', vdims='Percent').opts(
-        title='Bleach Type Distribution', xlabel='Bleaching Profile', ylabel='Proportion of Tracks (%)', color='#4E79A7', width=750, height=450, show_legend=False
-    ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+
+    proportion_bars = (
+        hv.Bars(proportion_df, kdims="Steps", vdims="Percent")
+        .opts(
+            title="Bleach Type Distribution",
+            xlabel="Bleaching Profile",
+            ylabel="Proportion of Tracks (%)",
+            color="#4E79A7",
+            width=750,
+            height=450,
+            show_legend=False,
+        )
+        .opts(HV_BOKEH_BASIC)
+        .opts(hooks=[bokeh_add_topright_linear_axes])
+        .opts(active_tools=[])
+    )
     
     all_individual_steps = []
     for sizes in results_df['step_sizes']:
@@ -855,10 +867,25 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         
     step_sizes_arr = np.array(all_individual_steps)
     counts_sz, bin_edges_sz = np.histogram(step_sizes_arr, bins='auto')
-    
-    size_hist = hv.Histogram((counts_sz, bin_edges_sz), kdims=['Bleaching Step Size (a.u.)'], vdims=['Frequency']).opts(
-        title='Step Size Distribution', color='#2ECC71', alpha=0.55, width=750, height=450, show_legend=False
-    ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+
+    size_hist = (
+        hv.Histogram(
+            (counts_sz, bin_edges_sz),
+            kdims=["Bleaching Step Size (a.u.)"],
+            vdims=["Frequency"],
+        )
+        .opts(
+            title="Step Size Distribution",
+            color="#2ECC71",
+            alpha=0.55,
+            width=750,
+            height=450,
+            show_legend=False,
+        )
+        .opts(HV_BOKEH_BASIC)
+        .opts(hooks=[bokeh_add_topright_linear_axes])
+        .opts(active_tools=[])
+    )
 
     tab_dict = {
         f"Trace {i+1}": plot for i, (_, plot) in enumerate(trace_plots)
