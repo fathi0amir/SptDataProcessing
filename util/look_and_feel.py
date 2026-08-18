@@ -831,9 +831,12 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         title_classes = ["Monomer", "Dimer", "Trimer/Aggregate"]
         class_label = title_classes[min(fit_info['num_steps'] - 1, 2)]
         
-        combined_track = (raw_curve * raw_scatter * fit_curve * text_annotation).opts(
-            title=f"{class_label} Trace {idx+1}", show_legend=False
-        ).opts(HV_BOKEH_BASIC).opts(hooks=[bokeh_add_topright_linear_axes])
+        combined_track = (
+            (raw_curve * raw_scatter * fit_curve * text_annotation)
+            .opts(title=f"{class_label} Trace {idx + 1}", show_legend=False)
+            .opts(HV_BOKEH_BASIC)
+            .opts(hooks=[bokeh_add_topright_linear_axes])
+        )
         
         trace_plots.append((f"Trace {idx+1}", combined_track))
         
@@ -858,7 +861,7 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         )
         .opts(HV_BOKEH_BASIC)
         .opts(hooks=[bokeh_add_topright_linear_axes])
-        .opts(active_tools=[])
+        .opts(tools=["hover"], active_tools=[])
     )
     
     all_individual_steps = []
@@ -884,7 +887,7 @@ def single_mol_multi_step_photobleaching_dashboard_tabbed(df, results_df, intens
         )
         .opts(HV_BOKEH_BASIC)
         .opts(hooks=[bokeh_add_topright_linear_axes])
-        .opts(active_tools=[])
+        .opts(tools=["hover"], active_tools=[])
     )
 
     tab_dict = {
